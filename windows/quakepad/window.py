@@ -23,6 +23,7 @@ from .findbar import FindBar
 from .icons import icon
 from .settings import APP_NAME, APP_VERSION, Settings, app_dir
 from .ai import AICorrector, apply_corrections, collect_blocks
+from .ai import resolve as resolve_ai
 from .spell import SpellChecker, document_text
 from .textio import ENCODINGS, EOLS
 from .theme import palette, qpalette, stylesheet
@@ -1148,9 +1149,10 @@ class QuakeWindow(QWidget):
         if not doc or self._ai_busy:
             return
         cfg = self.settings
-        if cfg["ai_provider"] == "anthropic" and not cfg["anthropic_key"]:
-            QMessageBox.information(self, APP_NAME, "Configurez d'abord l'IA : clé API Anthropic, "
-                                    "ou une IA locale (Ollama) dans l'onglet Correction.")
+        ep = resolve_ai(cfg)
+        if not ep["key"] and ep["id"] not in ("ollama", "openai"):
+            QMessageBox.information(self, APP_NAME, "Configurez d'abord l'IA : choisissez un fournisseur "
+                                    "(Google Gemini et Mistral sont gratuits) et collez votre clé API.")
             self.open_settings(tab=3)
             return
         selection = doc.textCursor().hasSelection()
@@ -1164,7 +1166,7 @@ class QuakeWindow(QWidget):
         for aid in ("spell.ai",):
             self._actions[aid][0].setEnabled(False)
         what = "la sélection" if selection else "la note"
-        model = cfg["anthropic_model"] if cfg["ai_provider"] == "anthropic" else cfg["openai_model"]
+        model = ep["model"]
         self._info(f"✦ Correction de {what} par IA ({model})…", keep=True)
         self.ai.correct(doc, blocks, dict(cfg))
 

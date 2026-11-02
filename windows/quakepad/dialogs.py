@@ -201,30 +201,37 @@ class SettingsDialog(QDialog):
 
         ai_box = QGroupBox("Correction automatique par IA (icône ✦ ou Ctrl+F7)")
         af = QFormLayout(ai_box)
+        from .ai import PROVIDERS
+
+        self._providers = PROVIDERS
+        self._ai_keys = dict(s.get("ai_keys", {}))
+        self._ai_models = dict(s.get("ai_models", {}))
+        self._ai_keys["anthropic"] = s["anthropic_key"]
+        self._ai_models["anthropic"] = s["anthropic_model"]
+        self._ai_keys["openai"] = s["openai_key"]
+        self._ai_models["openai"] = s["openai_model"]
         self.ai_provider = QComboBox()
-        self.ai_provider.addItem("Claude — API Anthropic", "anthropic")
-        self.ai_provider.addItem("IA compatible OpenAI — Ollama, LM Studio, Mistral…", "openai")
+        for pid, meta in PROVIDERS.items():
+            self.ai_provider.addItem(meta["label"], pid)
         self.ai_provider.setCurrentIndex(max(0, self.ai_provider.findData(s["ai_provider"])))
+        self._ai_current = self.ai_provider.currentData()
         af.addRow("Fournisseur", self.ai_provider)
 
-        self.anthropic_key = QLineEdit(s["anthropic_key"])
-        self.anthropic_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.anthropic_key.setPlaceholderText("sk-ant-…  (console.anthropic.com → API Keys)")
-        self.anthropic_model = QComboBox(editable=True)
-        self.anthropic_model.addItems(["claude-haiku-5-5", "claude-sonnet-5-5"])
-        self.anthropic_model.setEditText(s["anthropic_model"])
-        self.anthropic_rows = [("Clé API", self.anthropic_key), ("Modèle", self.anthropic_model)]
-
+        self.ai_key = QLineEdit()
+        self.ai_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.key_btn = QPushButton("Obtenir une clé…")
+        self.key_btn.clicked.connect(self._open_key_page)
+        key_row = QHBoxLayout()
+        key_row.addWidget(self.ai_key, 1)
+        key_row.addWidget(self.key_btn)
+        self.ai_key_label = QLabel("Clé API")
+        af.addRow(self.ai_key_label, key_row)
+        self.ai_model = QComboBox(editable=True)
+        af.addRow("Modèle", self.ai_model)
         self.openai_base = QLineEdit(s["openai_base"])
-        self.openai_base.setPlaceholderText("http://localhost:11434/v1")
-        self.openai_key = QLineEdit(s["openai_key"])
-        self.openai_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.openai_key.setPlaceholderText("Facultative pour Ollama / LM Studio")
-        self.openai_model = QLineEdit(s["openai_model"])
-        self.openai_rows = [("Adresse de l'API", self.openai_base), ("Clé API", self.openai_key),
-                            ("Modèle", self.openai_model)]
-        for label, w in self.anthropic_rows + self.openai_rows:
-            af.addRow(label, w)
+        self.openai_base.setPlaceholderText("https://api.exemple.com/v1")
+        self.base_label = QLabel("Adresse de l'API")
+        af.addRow(self.base_label, self.openai_base)
         self._ai_form = af
 
         test_row = QHBoxLayout()
@@ -238,8 +245,8 @@ class SettingsDialog(QDialog):
         self.ai_note = QLabel()
         self.ai_note.setWordWrap(True)
         af.addRow(self.ai_note)
+        self._load_provider(self._ai_current)
         self.ai_provider.currentIndexChanged.connect(self._ai_provider_changed)
-        self._ai_provider_changed()
         sv.addWidget(ai_box)
 
         lt_box = QGroupBox("Vérification mot par mot — LanguageTool (icône A✓ ou F7)")
@@ -317,29 +324,52 @@ class SettingsDialog(QDialog):
         }
 
     # --- IA ------------------------------------------------------------------
-    def _ai_values(self) -> dict:
-        return {
-            "ai_provider": self.ai_provider.currentData(),
-            "anthropic_key": self.anthropic_key.text().strip(),
-            "anthropic_model": self.anthropic_model.currentText().strip() or DEFAULTS["anthropic_model"],
-            "openai_base": self.openai_base.text().strip() or DEFAULTS["openai_base"],
-            "openai_key": self.openai_key.text().strip(),
-            "openai_model": self.openai_model.text().strip() or DEFAULTS["openai_model"],
-        }
+    def _store_provider(self, pid: str) -> None:
+        self._ai_keys[pid] = self.ai_key.text().strip()
+        self._ai_models[pid] = self.ai_model.currentText().strip()
+
+    def _load_provider(self, pid: str) -> None:
+        meta = self._providers[pid]
+        self.ai_key.setText(self._ai_keys.get(pid, ""))
+        self.ai_key.setPlaceholderText(meta["key_hint"])
+        self.ai_model.clear()
+        self.ai_model.addItems(meta["models"])
+        self.ai_model.setEditText(self._ai_models.get(pid) or meta["model"])
+        custom = meta.get("base") is None
+        self._ai_form.setRowVisible(self.openai_base, custom)
+        self.key_btn.setVisible(bool(meta["key_url"]))
+        self.key_btn.setText("Télécharger Ollama…" if pid == "ollama" else "Obtenir une clé…")
+        self.ai_key_label.setText("Clé API (facultative)" if pid in ("ollama", "openai") else "Clé API")
+        self.ai_note.setText(f"<small>{meta['note']}</small>")
+        self.test_result.setText("")
 
     def _ai_provider_changed(self) -> None:
-        anthropic = self.ai_provider.currentData() == "anthropic"
-        for rows, visible in ((self.anthropic_rows, anthropic), (self.openai_rows, not anthropic)):
-            for _label, w in rows:
-                self._ai_form.setRowVisible(w, visible)
-        self.ai_note.setText(
-            "<small>Le texte est envoyé à Anthropic. <code>claude-haiku-5-5</code> : rapide et économique. "
-            "<code>claude-sonnet-5-5</code> : plus précis sur les phrases très fautives (environ 20× plus cher, "
-            "reste de l'ordre du centime par note). Clé chiffrée avec votre compte Windows (DPAPI).</small>"
-            if anthropic else
-            "<small>Pour une IA 100 % locale : installez Ollama puis <code>ollama pull mistral-nemo</code>. "
-            "Rien ne quitte le PC. La qualité dépend du modèle choisi.</small>")
-        self.test_result.setText("")
+        self._store_provider(self._ai_current)
+        self._ai_current = self.ai_provider.currentData()
+        self._load_provider(self._ai_current)
+
+    def _open_key_page(self) -> None:
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        url = self._providers[self._ai_current]["key_url"]
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
+
+    def _ai_values(self) -> dict:
+        self._store_provider(self._ai_current)
+        keys = {k: v for k, v in self._ai_keys.items() if k not in ("anthropic", "openai")}
+        models = {k: v for k, v in self._ai_models.items() if k not in ("anthropic", "openai") and v}
+        return {
+            "ai_provider": self._ai_current,
+            "ai_keys": keys,
+            "ai_models": models,
+            "anthropic_key": self._ai_keys.get("anthropic", ""),
+            "anthropic_model": self._ai_models.get("anthropic") or DEFAULTS["anthropic_model"],
+            "openai_base": self.openai_base.text().strip() or DEFAULTS["openai_base"],
+            "openai_key": self._ai_keys.get("openai", ""),
+            "openai_model": self._ai_models.get("openai") or DEFAULTS["openai_model"],
+        }
 
     def _test_ai(self) -> None:
         from PySide6.QtWidgets import QApplication

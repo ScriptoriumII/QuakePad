@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "QuakePad"
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.4.0"
 SECRET_KEYS = ("anthropic_key", "openai_key")
 
 # Scan code 0x29 = touche située sous Échap (« ² » en AZERTY, « ` » en QWERTY),
@@ -48,7 +48,9 @@ DEFAULTS: dict = {
     "shortcuts": {},  # identifiant d'action -> séquence personnalisée
     "spell_server": "https://api.languagetool.org/v2/check",
     "spell_language": "fr",
-    "ai_provider": "anthropic",  # anthropic | openai
+    "ai_provider": "gemini",  # gemini | mistral | anthropic | ollama | openai (autre)
+    "ai_keys": {},  # fournisseur -> clé (chiffrée DPAPI dans le fichier)
+    "ai_models": {},  # fournisseur -> modèle choisi
     "anthropic_key": "",  # chiffrée avec DPAPI (compte Windows) dans le fichier
     "anthropic_model": "claude-haiku-5-5",
     "openai_base": "http://localhost:11434/v1",
@@ -84,7 +86,7 @@ class Settings(dict):
             if "sizes" not in data and "height_pct" in data:
                 s["sizes"]["top"] = {"depth": data.get("height_pct", 45), "span": data.get("width_pct", 100)}
             for key, value in data.items():
-                if key in ("hotkey", "shortcuts") and isinstance(value, dict):
+                if key in ("hotkey", "shortcuts", "ai_keys", "ai_models") and isinstance(value, dict):
                     s[key].update(value)
                 elif key == "sizes" and isinstance(value, dict):
                     for edge, size in value.items():
@@ -97,6 +99,17 @@ class Settings(dict):
         from .winapi import unprotect
         for k in SECRET_KEYS:
             s[k] = unprotect(s.get(k, ""))
+        s["ai_keys"] = {pid: unprotect(v) for pid, v in s["ai_keys"].items()}
+        # Migration : une clé Google (AIza…) saisie dans « compatible OpenAI » passe sur Gemini.
+        if s["openai_key"].startswith("AIza") and not s["ai_keys"].get("gemini"):
+            s["ai_keys"]["gemini"] = s["openai_key"]
+            s["openai_key"] = ""
+            s["openai_base"] = DEFAULTS["openai_base"]
+            s["openai_model"] = DEFAULTS["openai_model"]
+            s["ai_provider"] = "gemini"
+        if isinstance(data, dict) and "ai_keys" not in data and data.get("ai_provider") == "anthropic" \
+                and not s["anthropic_key"]:
+            s["ai_provider"] = "gemini"  # jamais configuré : proposer d'abord l'option gratuite
         if s["edge"] not in EDGES:
             s["edge"] = "top"
         return s
@@ -110,6 +123,7 @@ class Settings(dict):
         data = dict(self)
         for k in SECRET_KEYS:  # clés API jamais écrites en clair sous Windows
             data[k] = protect(data.get(k, ""))
+        data["ai_keys"] = {pid: protect(v) for pid, v in self["ai_keys"].items() if v}
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, self.path)

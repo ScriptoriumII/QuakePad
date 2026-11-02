@@ -34,10 +34,17 @@ Les notes **ne sont pas synchronisées** entre les deux.
 > ℹ️ Un fichier `.txt` reste du texte brut : le collage s'y fait sans mise en forme, et si vous ajoutez des images ou du gras, QuakePad propose d'enregistrer en `.html` pour ne rien perdre.
 
 ### Correction par IA : configuration
-☰ → Paramètres → **Correction** :
-- **Claude** : créez une clé sur [console.anthropic.com](https://console.anthropic.com) (paiement à l'usage ; une note courante coûte une fraction de centime avec `claude-haiku-5-5`). La clé est **chiffrée avec votre compte Windows (DPAPI)** dans `settings.json`.
-- **IA locale (rien ne quitte le PC)** : installez [Ollama](https://ollama.com), puis `ollama pull mistral-nemo` ; adresse `http://localhost:11434/v1`, modèle `mistral-nemo`.
-- Bouton **Tester la connexion** pour valider.
+☰ → Paramètres → **Correction** → choisissez le **Fournisseur**, cliquez sur **Obtenir une clé…**, collez la clé, puis **Tester la connexion** :
+
+| Fournisseur | Coût | Modèle par défaut | Confidentialité |
+|---|---|---|---|
+| **Google Gemini** | Gratuit (quotas), sans carte | `gemini-3.8-flash` | En gratuit, Google peut exploiter les textes : notes non sensibles |
+| **Mistral** | Gratuit (quotas), sans carte | `mistral-small-latest` | En gratuit, textes possiblement utilisés pour l'entraînement |
+| **Claude (Anthropic)** | Payant à l'usage (Claude Platform) | `claude-haiku-5-5` | Envoyé à Anthropic |
+| **Ollama** | Gratuit, local | `mistral-nemo` | Rien ne quitte le PC |
+| **Autre (compatible OpenAI)** | Selon le service | — | Groq, OpenRouter, LM Studio… : saisir l'adresse **de l'API** (`…/v1`) |
+
+Chaque fournisseur garde sa propre clé et son modèle ; les clés sont **chiffrées avec votre compte Windows (DPAPI)** dans `settings.json`.
 
 Garde-fous : un paragraphe trop réécrit (moins de 60 % de similarité) ou dont l'IA change le nombre d'images est ignoré ; si l'IA renvoie un nombre de paragraphes différent, rien n'est modifié.
 

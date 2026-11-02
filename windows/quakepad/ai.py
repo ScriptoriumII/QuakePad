@@ -1,4 +1,4 @@
-"""Correction automatique par IA (Claude via l'API Anthropic, ou API compatible OpenAI : Ollama, LM Studio…).
+"""Correction automatique par IA : Claude (Anthropic), Google Gemini, Mistral, Ollama ou toute API compatible OpenAI.
 
 Le texte est envoyé paragraphe par paragraphe ; la réponse corrigée est réappliquée caractère par
 caractère (diff), ce qui préserve la mise en forme, les images et les tableaux.
@@ -20,6 +20,68 @@ ANTHROPIC_VERSION = "2023-06-01"
 DEFAULT_ANTHROPIC_MODEL = "claude-haiku-5-5"
 DEFAULT_OPENAI_BASE = "http://localhost:11434/v1"  # Ollama
 DEFAULT_OPENAI_MODEL = "mistral-nemo"
+
+# Fournisseurs proposés dans Paramètres → Correction.
+#   kind "anthropic" = API Messages d'Anthropic ; "openai" = /chat/completions compatible OpenAI.
+#   base None = adresse saisie par l'utilisateur (fournisseur « Autre »).
+PROVIDERS = {
+    "gemini": {
+        "label": "Google Gemini — gratuit", "kind": "openai",
+        "base": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "model": "gemini-3.8-flash", "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite"],
+        "key_url": "https://aistudio.google.com/api-keys", "key_hint": "AIza…",
+        "note": "Gratuit, sans carte bancaire. En offre gratuite, Google peut utiliser les textes pour "
+                "améliorer ses produits (relecture humaine possible) : réservez-le aux notes non sensibles.",
+    },
+    "mistral": {
+        "label": "Mistral — gratuit (français, UE)", "kind": "openai",
+        "base": "https://api.mistral.ai/v1",
+        "model": "mistral-small-latest", "models": ["mistral-small-latest", "mistral-medium-latest", "mistral-large-latest"],
+        "key_url": "https://console.mistral.ai/api-keys", "key_hint": "clé Mistral",
+        "note": "Mode gratuit sans carte bancaire, excellente qualité en français. En gratuit, les textes "
+                "peuvent servir à améliorer les modèles : vérifiez l'option dans votre console Mistral.",
+    },
+    "anthropic": {
+        "label": "Claude — Anthropic (payant à l'usage)", "kind": "anthropic",
+        "model": DEFAULT_ANTHROPIC_MODEL, "models": ["claude-haiku-5-5", "claude-sonnet-5-5"],
+        "key_url": "https://platform.claude.com/settings/keys", "key_hint": "sk-ant-…",
+        "note": "Clé à créer sur Claude Platform (facturation séparée de l'abonnement Claude). "
+                "claude-haiku-5-5 : rapide et économique ; claude-sonnet-5-5 : plus précis.",
+    },
+    "ollama": {
+        "label": "Ollama — IA locale gratuite", "kind": "openai",
+        "base": "http://localhost:11434/v1",
+        "model": "mistral-nemo", "models": ["mistral-nemo", "mistral-small3.2", "gemma3:12b", "qwen3:8b"],
+        "key_url": "https://ollama.com/download", "key_hint": "(aucune clé)",
+        "note": "100 % local, rien ne quitte le PC. Installez Ollama puis « ollama pull mistral-nemo ».",
+    },
+    "openai": {
+        "label": "Autre service compatible OpenAI…", "kind": "openai", "base": None,
+        "model": DEFAULT_OPENAI_MODEL, "models": [],
+        "key_url": "", "key_hint": "clé du service",
+        "note": "Groq, OpenRouter, LM Studio, OpenAI… : indiquez l'adresse de l'API (se termine souvent par /v1), "
+                "pas celle de la page web du service.",
+    },
+}
+
+
+def resolve(cfg: dict) -> dict:
+    """Paramètres effectifs (type, adresse, clé, modèle) du fournisseur choisi."""
+    pid = cfg.get("ai_provider") or "gemini"
+    meta = PROVIDERS.get(pid, PROVIDERS["openai"])
+    keys = cfg.get("ai_keys") or {}
+    models = cfg.get("ai_models") or {}
+    if pid == "anthropic":
+        key = cfg.get("anthropic_key", "")
+        model = cfg.get("anthropic_model") or meta["model"]
+    elif pid == "openai":
+        key = cfg.get("openai_key", "")
+        model = cfg.get("openai_model") or meta["model"]
+    else:
+        key = keys.get(pid, "")
+        model = models.get(pid) or meta["model"]
+    base = meta.get("base") or (cfg.get("openai_base") or DEFAULT_OPENAI_BASE)
+    return {"id": pid, "kind": meta["kind"], "base": base.rstrip("/"), "key": key, "model": model, "meta": meta}
 OBJ = "￼"  # caractère d'une image dans le document Qt
 BATCH_CHARS = 12000
 BATCH_PARAS = 80
@@ -58,7 +120,15 @@ def _post_json(url: str, payload: dict, headers: dict, timeout: int = 120) -> di
                                  headers={"content-type": "application/json", **headers})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            raw = resp.read().decode("utf-8", "replace")
+        try:
+            return json.loads(raw)
+        except ValueError:
+            hint = ""
+            if "aistudio.google.com" in url or "console." in url or raw.lstrip().startswith("<"):
+                hint = (" L'adresse semble être celle d'une page web (page des clés, console…) et non celle "
+                        "de l'API. Choisissez le fournisseur dédié dans la liste, ou corrigez l'adresse.")
+            raise AIError("Le serveur n'a pas renvoyé de réponse d'API (JSON)." + hint) from None
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:300]
         if exc.code in (401, 403):
@@ -66,38 +136,44 @@ def _post_json(url: str, payload: dict, headers: dict, timeout: int = 120) -> di
         if exc.code == 429:
             raise AIError("Limite de requêtes atteinte (429). Réessayez dans un instant.") from exc
         if exc.code == 404:
-            raise AIError(f"Modèle ou adresse introuvable (404). {detail}") from exc
+            raise AIError(f"Modèle ou adresse introuvable (404) : vérifiez le nom du modèle. {detail}") from exc
+        if exc.code == 400 and "API key" in detail:
+            raise AIError("Clé API invalide pour ce fournisseur. Vérifiez-la dans Paramètres → Correction.") from exc
         raise AIError(f"Erreur HTTP {exc.code} : {detail}") from exc
     except urllib.error.URLError as exc:
         raise AIError(f"Serveur injoignable : {exc.reason}") from exc
 
 
 def _call(cfg: dict, user_text: str) -> str:
-    provider = cfg.get("ai_provider", "anthropic")
-    if provider == "anthropic":
-        key = cfg.get("anthropic_key", "")
-        if not key:
+    ep = resolve(cfg)
+    if ep["kind"] == "anthropic":
+        if not ep["key"]:
             raise AIError("Aucune clé API Anthropic configurée (Paramètres → Correction).")
         data = _post_json(ANTHROPIC_URL, {
-            "model": cfg.get("anthropic_model") or DEFAULT_ANTHROPIC_MODEL,
+            "model": ep["model"],
             "max_tokens": 16000,
             "system": SYSTEM_PROMPT,
             "messages": [{"role": "user", "content": user_text}],
-        }, {"x-api-key": key, "anthropic-version": ANTHROPIC_VERSION})
+        }, {"x-api-key": ep["key"], "anthropic-version": ANTHROPIC_VERSION})
         if data.get("stop_reason") == "max_tokens":
             raise AIError("Réponse tronquée : sélectionnez une partie plus courte du texte.")
         return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
-    # API compatible OpenAI (Ollama, LM Studio, Mistral, OpenAI…)
-    base = (cfg.get("openai_base") or DEFAULT_OPENAI_BASE).rstrip("/")
-    headers = {}
-    if cfg.get("openai_key"):
-        headers["authorization"] = f"Bearer {cfg['openai_key']}"
-    data = _post_json(f"{base}/chat/completions", {
-        "model": cfg.get("openai_model") or DEFAULT_OPENAI_MODEL,
+    # API compatible OpenAI (Gemini, Mistral, Ollama, Groq, OpenRouter, LM Studio…)
+    if not ep["key"] and ep["id"] not in ("ollama", "openai"):
+        raise AIError(f"Aucune clé API configurée pour {ep['meta']['label'].split(' —')[0]} "
+                      "(Paramètres → Correction).")
+    headers = {"authorization": f"Bearer {ep['key']}"} if ep["key"] else {}
+    data = _post_json(f"{ep['base']}/chat/completions", {
+        "model": ep["model"],
         "temperature": 0,
         "messages": [{"role": "system", "content": SYSTEM_PROMPT},
                      {"role": "user", "content": user_text}],
     }, headers, timeout=300)
+    if isinstance(data, list) and data and isinstance(data[0], dict) and "error" in data[0]:
+        data = data[0]  # certaines API renvoient l'erreur dans une liste
+    if isinstance(data, dict) and data.get("error"):
+        err = data["error"]
+        raise AIError(f"Erreur du service IA : {err.get('message', err) if isinstance(err, dict) else err}")
     try:
         return data["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError, TypeError) as exc:

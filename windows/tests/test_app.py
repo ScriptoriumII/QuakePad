@@ -154,3 +154,16 @@ def test_dialogs_are_raised_above_topmost_window(window, qapp):
 def test_quit_really_exits(window, qapp):
     QTimer.singleShot(100, window.quit_app)
     assert qapp.exec() == 0
+
+
+def test_format_bar_follows_tab_area_size(window, qapp):
+    """Régression 1.7.0 : sous Windows, la zone des onglets reçoit sa taille après la fenêtre ;
+    la barre de mise en forme doit suivre la zone des onglets, pas seulement la fenêtre."""
+    window.show()
+    qapp.processEvents()
+    window.format_bar.resize(640, 30)  # état observé sous Windows à l'ouverture
+    window.tabs.resize(1234, 300)  # mise en page tardive de la zone des onglets
+    qapp.processEvents()
+    assert window.format_bar.width() == window.tabs.width() > 640
+    bar_bottom = window.tabs.tabBar().geometry().bottom()
+    assert window.format_bar.y() == bar_bottom + 1

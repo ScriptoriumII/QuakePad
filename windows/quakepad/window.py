@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPropertyAnimation, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QPropertyAnimation, QSize, Qt, QTimer
 from PySide6.QtGui import (
     QAction,
     QFont,
@@ -191,6 +191,9 @@ class QuakeWindow(
         cv.addWidget(self.status)
         # La barre de mise en forme est superposée sous les onglets, au-dessus du texte.
         self.format_bar.setParent(self.tabs)
+        self._format_bar_pending = False
+        self.tabs.installEventFilter(self)
+        self.tabs.tabBar().installEventFilter(self)
 
         self.handles = {side: EdgeHandle(self, side) for side in ("top", "bottom", "left", "right")}
         grid = QGridLayout(self)
@@ -572,15 +575,30 @@ class QuakeWindow(
         self.format_bar.raise_()
         self.new_tab_btn.setFixedSize(self.new_tab_btn.sizeHint())
         plus_w = self.new_tab_btn.sizeHint().width() + 8
-        self.tabs.setStyleSheet(
+        sheet = (
             f"QTabWidget::pane {{ margin-top: {h}px; border: none; }}"
             f"#MainTabs::tab:last {{ min-width: {plus_w}px; max-width: {plus_w}px; }}"
         )
+        if self.tabs.styleSheet() != sheet:  # évite une boucle repolissage -> redimensionnement
+            self.tabs.setStyleSheet(sheet)
 
     def resizeEvent(self, e):  # noqa: N802
         super().resizeEvent(e)
         if hasattr(self, "format_bar"):
             self._position_format_bar()
+
+    def eventFilter(self, obj, ev):  # noqa: N802
+        """Suit la taille réelle de la zone des onglets : sous Windows, elle est fixée par la mise en
+        page après la fenêtre (au show), et l'animation Quake ne fait ensuite que déplacer la fenêtre."""
+        if ev.type() in (QEvent.Type.Resize, QEvent.Type.Show) and obj in (self.tabs, self.tabs.tabBar()):
+            if not self._format_bar_pending:
+                self._format_bar_pending = True
+                QTimer.singleShot(0, self._reposition_format_bar_now)
+        return super().eventFilter(obj, ev)
+
+    def _reposition_format_bar_now(self) -> None:
+        self._format_bar_pending = False
+        self._position_format_bar()
 
     def _font(self) -> QFont:
         font = QFont(self.settings["font_family"])

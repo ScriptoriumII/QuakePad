@@ -37,8 +37,8 @@ Lancé depuis les sources (`run.bat`), QuakePad signale la nouvelle version mais
 1. Mettre à jour `APP_VERSION` dans `windows/quakepad/settings.py`.
 2. Créer une **étiquette annotée** (son message devient les notes de version) et la pousser :
    ```bash
-   git tag -a v1.7.0 -m "Nouveautés…"
-   git push origin v1.7.0
+   git tag -a v1.7.1 -m "Nouveautés…"
+   git push origin v1.7.1
    ```
 3. GitHub Actions teste, construit l'installateur, calcule les empreintes et publie la Release.
 

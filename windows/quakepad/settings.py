@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "QuakePad"
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.7.1"
 SECRET_KEYS = ("anthropic_key", "openai_key")
 MERGED_DICTS = ("hotkey", "shortcuts", "ai_keys", "ai_models", "ai_quotas")
 

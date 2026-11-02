@@ -14,19 +14,33 @@ PALETTES = {
 }
 
 
+THEMES = {"system": "Système", "dark": "Sombre", "light": "Clair"}
+
+
+def resolve(name: str) -> str:
+    """« system » suit le mode clair/sombre de Windows."""
+    if name in ("dark", "light"):
+        return name
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QGuiApplication
+
+    scheme = QGuiApplication.styleHints().colorScheme()
+    return "light" if scheme == Qt.ColorScheme.Light else "dark"
+
+
 def palette(name: str) -> dict:
-    return PALETTES.get(name, PALETTES["dark"])
+    return PALETTES.get(resolve(name), PALETTES["dark"])
 
 
 def stylesheet(name: str, assets: str = "") -> str:
     p = palette(name)
-    theme = "light" if name == "light" else "dark"
+    theme = resolve(name)
     close = f"{assets}/close-{theme}.svg".replace("\\", "/")
     close_hover = f"{assets}/close-{theme}-hover.svg".replace("\\", "/")
     return f"""
 #QuakeRoot {{ background: {p['bg']}; }}
 QWidget {{ color: {p['fg']}; font-size: 10pt; }}
-QPlainTextEdit {{
+QTextEdit {{
     background: {p['bg']}; color: {p['fg']}; border: none;
     selection-background-color: {p['selection']}; selection-color: {p['fg']};
     padding: 6px 10px;
@@ -41,7 +55,13 @@ QTabBar::tab:selected {{ color: {p['fg']}; background: {p['bg']}; border-bottom:
 QTabBar::tab:hover:!selected {{ color: {p['fg']}; background: {p['raised']}; }}
 QTabBar::close-button {{ subcontrol-position: right; image: url({close}); border-radius: 3px; margin: 2px; }}
 QTabBar::close-button:hover {{ image: url({close_hover}); background: {p['raised']}; }}
-#TopBar, #StatusBar, #FindBar {{ background: {p['surface']}; }}
+#TopBar, #StatusBar, #FindBar, #FormatBar {{ background: {p['surface']}; }}
+#FormatBar {{ border-top: 1px solid {p['border']}; border-bottom: 1px solid {p['border']}; spacing: 2px; padding: 2px 6px; }}
+#FormatBar QToolButton {{ padding: 4px; }}
+#FormatBar QToolButton:checked {{ background: {p['raised']}; }}
+#FormatBar QComboBox {{ padding: 2px 4px; min-width: 52px; }}
+#FormatBar::separator {{ width: 1px; background: {p['border']}; margin: 4px 4px; }}
+#MainTabs::tab:last {{ min-width: 28px; padding: 7px 10px; color: {p['accent']}; }}
 #StatusBar QLabel {{ color: {p['muted']}; font-size: 9pt; padding: 0 6px; }}
 #AccentEdge {{ background: {p['accent']}; }}
 #DragHandle {{ background: {p['surface']}; }}

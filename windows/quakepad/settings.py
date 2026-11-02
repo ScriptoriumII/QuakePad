@@ -7,11 +7,13 @@ import os
 from pathlib import Path
 
 APP_NAME = "QuakePad"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 # Scan code 0x29 = touche située sous Échap (« ² » en AZERTY, « ` » en QWERTY),
 # la même que celle utilisée par le mode Quake de Windows Terminal.
 SCANCODE_UNDER_ESC = 0x29
+
+EDGES = {"top": "Haut", "bottom": "Bas", "left": "Gauche", "right": "Droite"}
 
 DEFAULTS: dict = {
     "hotkey": {
@@ -23,8 +25,15 @@ DEFAULTS: dict = {
         "scancode": SCANCODE_UNDER_ESC,
         "label": "Alt+²",
     },
-    "height_pct": 45,
-    "width_pct": 100,
+    # Bord d'ancrage et taille mémorisée pour chaque bord (en % de l'écran) :
+    # depth = épaisseur (hauteur en haut/bas, largeur à gauche/droite), span = étendue.
+    "edge": "top",
+    "sizes": {
+        "top": {"depth": 45, "span": 100},
+        "bottom": {"depth": 45, "span": 100},
+        "left": {"depth": 35, "span": 100},
+        "right": {"depth": 35, "span": 100},
+    },
     "opacity": 97,
     "anim_ms": 170,
     "hide_on_focus_loss": True,
@@ -33,7 +42,11 @@ DEFAULTS: dict = {
     "zoom": 0,
     "word_wrap": True,
     "show_statusbar": True,
-    "theme": "dark",
+    "show_toolbar": True,
+    "theme": "system",  # system | dark | light
+    "shortcuts": {},  # identifiant d'action -> séquence personnalisée
+    "spell_server": "https://api.languagetool.org/v2/check",
+    "spell_language": "fr",
     "start_with_windows": False,
     "first_run": True,
 }
@@ -57,15 +70,27 @@ class Settings(dict):
         s.path = app_dir() / "settings.json"
         try:
             data = json.loads(s.path.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                for key, value in data.items():
-                    if key == "hotkey" and isinstance(value, dict):
-                        s["hotkey"].update(value)
-                    elif key in DEFAULTS:
-                        s[key] = value
         except (OSError, ValueError):
-            pass
+            data = None
+        if isinstance(data, dict):
+            # Migration depuis la 1.0 (height_pct / width_pct, thème sans « système »)
+            if "sizes" not in data and "height_pct" in data:
+                s["sizes"]["top"] = {"depth": data.get("height_pct", 45), "span": data.get("width_pct", 100)}
+            for key, value in data.items():
+                if key in ("hotkey", "shortcuts") and isinstance(value, dict):
+                    s[key].update(value)
+                elif key == "sizes" and isinstance(value, dict):
+                    for edge, size in value.items():
+                        if edge in s["sizes"] and isinstance(size, dict):
+                            s["sizes"][edge].update(size)
+                elif key in DEFAULTS:
+                    s[key] = value
+        if s["edge"] not in EDGES:
+            s["edge"] = "top"
         return s
+
+    def size(self, edge: str | None = None) -> dict:
+        return self["sizes"][edge or self["edge"]]
 
     def save(self) -> None:
         tmp = self.path.with_suffix(".tmp")

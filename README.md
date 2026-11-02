@@ -16,33 +16,49 @@ Les notes **ne sont pas synchronisées** entre les deux.
 ## Application Windows
 
 ### Fonctionnalités
-- Fenêtre sans bordure, toujours au premier plan, qui **glisse depuis le haut** de l'écran où se trouve la souris (multi-écrans).
+- Fenêtre sans bordure, toujours au premier plan, qui **glisse depuis le bord choisi** : haut, bas, gauche ou droite (☰ → Affichage → Position), sur l'écran où se trouve la souris.
+- **Redimensionnable** en tirant ses bords ; la taille est **mémorisée pour chaque position** et retrouvée au prochain lancement.
 - **Raccourci global** configurable, indépendant de la disposition clavier (AZERTY/QWERTY).
-- Masquage automatique à la perte de focus (désactivable, ou bouton 📌 pour épingler).
-- Hauteur ajustable en tirant le bord inférieur ; largeur, opacité et durée d'animation réglables.
-- **Onglets** multiples, glisser-déposer de fichiers, ouverture en ligne de commande.
-- **Session restaurée** au redémarrage, y compris les onglets non enregistrés (comme le Bloc-notes de Windows 11).
-- Détection d'encodage (UTF-8, UTF-8 BOM, UTF-16, ANSI/Windows-1252) et des fins de ligne (CRLF/LF/CR), conservés à l'enregistrement et modifiables.
-- Rechercher / remplacer intégré : casse, mot entier, expressions régulières (`\1` dans le remplacement), tout remplacer en un seul Ctrl+Z.
-- Thèmes sombre / clair, zoom, retour à la ligne, barre d'état, impression.
-- Icône dans la zone de notification, instance unique, lancement au démarrage de Windows (sans droits admin).
+- **Se réduit quand on clique sur une autre fenêtre** (désactivable, ou bouton 📌 pour épingler).
+- **Onglets** avec un onglet **« + »** accolé pour créer une note d'un clic ; session restaurée (même non enregistrée, images comprises).
+- **Barre de mise en forme** : taille du texte (A−, liste, A+), gras, italique, souligné, barré, couleur, listes, **tableau** (et ajout/suppression de lignes/colonnes), **image**, effacer la mise en forme.
+- **Photos** : bouton image, copier-coller (capture d'écran comprise) ou glisser-déposer ; redimensionnables au clic droit (25/50/75/100 %). Elles sont intégrées au document.
+- **Correction orthographe et grammaire** (icône A✓ ou F7) via LanguageTool : fautes soulignées, suggestions au clic droit, F8 = faute suivante.
+- **Export PDF** (A4) et impression.
+- Formats : `.txt` (encodage et fins de ligne conservés), `.html` (mise en forme + images), `.md` ; ouverture et enregistrement dans **n'importe quel dossier**.
+- **Raccourcis clavier personnalisables** (☰ → Paramètres → Raccourcis).
+- Thèmes **Système** (suit Windows), **Clair** et **Sombre**.
+- Rechercher / remplacer (casse, mot entier, regex), zoom, retour à la ligne, barre d'état, icône de notification, instance unique, lancement au démarrage de Windows.
 
-### Raccourcis
+> ℹ️ Un fichier `.txt` reste du texte brut : le collage s'y fait sans mise en forme, et si vous ajoutez des images ou du gras, QuakePad propose d'enregistrer en `.html` pour ne rien perdre.
+
+### Correction orthographique : confidentialité
+Le texte de la note est envoyé au serveur LanguageTool configuré. Par défaut, c'est le serveur public `api.languagetool.org` (gratuit, 20 requêtes/min). Pour garder les notes en interne :
+```bash
+docker run -d -p 8010:8010 erikvl87/languagetool
+```
+puis ☰ → Paramètres → Correction → `http://serveur:8010/v2/check`.
+
+### Raccourcis par défaut (tous modifiables)
 | Action | Touches |
 |---|---|
-| Afficher / masquer | Alt+² (configurable) — Échap pour masquer |
+| Afficher / masquer | Alt+² (global) — Échap pour masquer |
 | Nouvel onglet / fermer | Ctrl+N / Ctrl+W |
-| Ouvrir / enregistrer / enregistrer sous / tout | Ctrl+O / Ctrl+S / Ctrl+Maj+S / Ctrl+Alt+S |
+| Ouvrir / enregistrer / sous / tout | Ctrl+O / Ctrl+S / Ctrl+Maj+S / Ctrl+Alt+S |
+| Exporter en PDF / imprimer | Ctrl+Maj+E / Ctrl+P |
+| Gras / italique / souligné / barré | Ctrl+B / Ctrl+I / Ctrl+U / Ctrl+Maj+X |
+| Agrandir / réduire le texte | Ctrl+] / Ctrl+[ |
+| Listes à puces / numérotée | Ctrl+Maj+L / Ctrl+Maj+O |
+| Tableau / image | Ctrl+Alt+T / Ctrl+Maj+I |
+| Effacer la mise en forme / coller sans mise en forme | Ctrl+Espace / Ctrl+Maj+V |
+| Correction / faute suivante | F7 / F8 |
 | Rechercher / remplacer / suivant / précédent | Ctrl+F / Ctrl+H / F3 / Maj+F3 |
-| Atteindre la ligne | Ctrl+G |
-| Date et heure | F5 |
-| Dupliquer la ligne | Ctrl+D |
+| Atteindre la ligne / date et heure / dupliquer la ligne | Ctrl+G / F5 / Ctrl+D |
 | Onglet suivant / précédent / n° | Ctrl+Tab / Ctrl+Maj+Tab / Alt+1…9 |
-| Zoom | Ctrl+= / Ctrl+- / Ctrl+0 |
-| Retour à la ligne | Alt+Z |
+| Zoom / barre de mise en forme / retour à la ligne | Ctrl+= Ctrl+- Ctrl+0 / Ctrl+Maj+T / Alt+Z |
 | Paramètres / quitter | Ctrl+, / Ctrl+Q |
 
-> ⚠️ **Win+²** est déjà pris par Windows Terminal (mode Quake). Si le raccourci choisi est occupé, QuakePad l'indique dans une notification : change-le dans **☰ → Paramètres**.
+> ⚠️ **Win+²** est déjà pris par Windows Terminal (mode Quake). Si le raccourci choisi est occupé, QuakePad l'indique dans une notification : changez-le dans **☰ → Paramètres**.
 
 ### Lancer depuis les sources
 ```bat

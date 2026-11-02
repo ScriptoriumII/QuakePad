@@ -52,6 +52,12 @@ def main() -> int:
     app.setApplicationName(APP_NAME)
     app.setQuitOnLastWindowClosed(False)
 
+    # Menus standards de Qt (clic droit : Copier, Coller…) en français
+    from PySide6.QtCore import QLibraryInfo, QLocale, QTranslator
+    translator = QTranslator(app)
+    if translator.load(QLocale("fr_FR"), "qtbase", "_", QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)):
+        app.installTranslator(translator)
+
     if _send_to_running_instance([str(Path(f).resolve()) for f in files]):
         return 0
 

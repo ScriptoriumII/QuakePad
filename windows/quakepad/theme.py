@@ -79,7 +79,14 @@ QTabBar::close-button:hover {{ image: url({close_hover}); background: {p['raised
 #FormatBar QToolButton:checked {{ background: {p['raised']}; }}
 #FormatBar QComboBox {{ padding: 2px 4px; min-width: 52px; }}
 #FormatBar::separator {{ width: 1px; background: {p['border']}; margin: 4px 4px; }}
-#MainTabs::tab:last {{ min-width: 28px; padding: 7px 10px; color: {p['accent']}; }}
+#MainTabs::tab:last {{ min-width: 0; padding: 3px 4px; border-bottom: 2px solid transparent; background: transparent; }}
+#NewTabBtn {{
+    color: {p['accent']}; font-weight: 600; padding: 3px 10px 3px 6px;
+    border: 1px solid {p['accent']}; border-radius: 5px; background: transparent;
+}}
+#NewTabBtn:hover {{ background: {p['accent']}; color: {p['accent_fg']}; }}
+#TabClose {{ padding: 1px; margin-left: 4px; border-radius: 3px; border: none; background: transparent; }}
+#TabClose:hover {{ background: {p['raised']}; }}
 #StatusBar QLabel {{ color: {p['muted']}; font-size: 9pt; padding: 0 6px; }}
 #AccentEdge {{ background: {p['accent']}; }}
 #DragHandle {{ background: {p['surface']}; }}

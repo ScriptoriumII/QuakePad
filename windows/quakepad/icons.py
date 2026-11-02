@@ -27,6 +27,7 @@ _PATHS = {
            '<path d="M8 14h1.5a1.5 1.5 0 0 0 0-3H8v6M13 11v6h1a3 3 0 0 0 0-6z"/>',
     "ai": '<path d="M10 3l1.6 4.4L16 9l-4.4 1.6L10 15l-1.6-4.4L4 9l4.4-1.6z"/>'
           '<path d="M14.5 17.5l2 2 4-4.5"/>',
+    "close": '<path d="M7 7l10 10M17 7L7 17"/>',
     "plus": '<path d="M12 5v14M5 12h14"/>',
     "pin": '<path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/>',
     "menu": '<path d="M4 7h16M4 12h16M4 17h16"/>',

@@ -137,7 +137,7 @@ class QuakeWindow(QWidget):
         self._icon_actions: list[tuple[object, str]] = []
 
         # --- Onglets + onglet « + » --------------------------------------------
-        self.tabs = QTabWidget(documentMode=True, tabsClosable=True, movable=True)
+        self.tabs = QTabWidget(documentMode=True, tabsClosable=False, movable=True)
         self.tabs.tabCloseRequested.connect(self.close_tab)
         self.tabs.currentChanged.connect(self._on_current_changed)
         bar = self.tabs.tabBar()
@@ -147,9 +147,16 @@ class QuakeWindow(QWidget):
         bar.tabMoved.connect(self._keep_plus_last)
         self._plus = QWidget()
         self._guard_plus = True  # pas de création automatique pendant l'initialisation
-        self.tabs.addTab(self._plus, "+")
+        self.tabs.addTab(self._plus, "")
+        # Bouton « Nouvel onglet » bien visible, accolé au dernier onglet
+        self.new_tab_btn = QToolButton(text=" Nouvel onglet", toolTip="Nouvel onglet (Ctrl+N)")
+        self.new_tab_btn.setObjectName("NewTabBtn")
+        self.new_tab_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.new_tab_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.new_tab_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.new_tab_btn.clicked.connect(lambda: self.new_tab())
+        bar.setTabButton(0, QTabBar.ButtonPosition.LeftSide, self.new_tab_btn)
         bar.setTabButton(0, QTabBar.ButtonPosition.RightSide, None)
-        bar.setTabButton(0, QTabBar.ButtonPosition.LeftSide, None)
         bar.setTabToolTip(0, "Nouvel onglet (Ctrl+N)")
 
         corner = QWidget()
@@ -499,6 +506,12 @@ class QuakeWindow(QWidget):
         app.setPalette(qpalette(self.settings["theme"]))
         app.setStyleSheet(stylesheet(self.settings["theme"], self.assets_dir))
         pal = palette(self.settings["theme"])
+        accent = pal["accent"]
+        self.new_tab_btn.setIcon(icon("plus", accent, 16))
+        for i in range(self.tabs.count()):
+            btn = self.tabs.tabBar().tabButton(i, QTabBar.ButtonPosition.RightSide)
+            if isinstance(btn, QToolButton) and btn.objectName() == "TabClose":
+                btn.setIcon(icon("close", pal["muted"], 14))
         for obj, name in self._icon_actions:
             obj.setIcon(icon(name, pal["muted"]))
         for h in getattr(self, "handles", {}).values():
@@ -535,7 +548,10 @@ class QuakeWindow(QWidget):
         self.format_bar.setVisible(h > 0)
         self.format_bar.setGeometry(0, bar.geometry().bottom() + 1, self.tabs.width(), h)
         self.format_bar.raise_()
-        self.tabs.setStyleSheet(f"QTabWidget::pane {{ margin-top: {h}px; border: none; }}")
+        self.new_tab_btn.setFixedSize(self.new_tab_btn.sizeHint())
+        plus_w = self.new_tab_btn.sizeHint().width() + 8
+        self.tabs.setStyleSheet(f"QTabWidget::pane {{ margin-top: {h}px; border: none; }}"
+                                f"#MainTabs::tab:last {{ min-width: {plus_w}px; max-width: {plus_w}px; }}")
 
     def resizeEvent(self, e):  # noqa: N802
         super().resizeEvent(e)
@@ -820,6 +836,13 @@ class QuakeWindow(QWidget):
         doc.filesDropped.connect(self.open_files)
         prev, self._guard_plus = self._guard_plus, True
         idx = self.tabs.insertTab(self.tabs.indexOf(self._plus), doc, doc.title())
+        close = QToolButton(toolTip="Fermer l'onglet (Ctrl+W)")
+        close.setObjectName("TabClose")
+        close.setIcon(icon("close", palette(self.settings["theme"])["muted"], 14))
+        close.setCursor(Qt.CursorShape.PointingHandCursor)
+        close.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        close.clicked.connect(lambda _=False, d=doc: self.close_tab(self.tabs.indexOf(d)))
+        self.tabs.tabBar().setTabButton(idx, QTabBar.ButtonPosition.RightSide, close)
         if focus:
             self.tabs.setCurrentIndex(idx)
             doc.setFocus()

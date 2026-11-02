@@ -87,6 +87,17 @@ class MockServer:
                 self.end_headers()
                 self.wfile.write(data)
 
+            def do_GET(self):  # noqa: N802
+                outer.requests.append({"path": self.path, "headers": dict(self.headers), "body": None})
+                status, headers, payload = handler(self.path, dict(self.headers), None)
+                data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+                self.send_response(status)
+                for k, v in (headers or {}).items():
+                    self.send_header(k, v)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
             def log_message(self, *args):
                 pass
 

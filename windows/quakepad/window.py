@@ -46,12 +46,15 @@ from .spell import SpellChecker
 from .tabs import TabsMixin
 from .textio import ENCODINGS, EOLS
 from .theme import palette, qpalette, stylesheet
+from .updates_ui import UpdatesMixin
 from .widgets import DialogWatcher, EdgeHandle, UsageIndicator
 
 FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72]
 
 
-class QuakeWindow(QuakeMixin, TabsMixin, FilesMixin, FormattingMixin, CorrectionMixin, SessionMixin, QWidget):
+class QuakeWindow(
+    QuakeMixin, TabsMixin, FilesMixin, FormattingMixin, CorrectionMixin, SessionMixin, UpdatesMixin, QWidget
+):
     def __init__(self, settings: Settings, app_icon: QIcon):
         super().__init__(
             None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool
@@ -152,6 +155,11 @@ class QuakeWindow(QuakeMixin, TabsMixin, FilesMixin, FormattingMixin, Correction
         self.lbl_hotkey = QLabel()
         self.usage = UsageIndicator()
         self.usage.clicked.connect(lambda: self.open_settings(tab=3))
+        self.update_btn = QToolButton()
+        self.update_btn.setObjectName("UpdateBtn")
+        self.update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_btn.clicked.connect(lambda: self.prompt_update())
+        self.update_btn.hide()
         sl.addWidget(self.lbl_path, 1)
         for w in (
             self.lbl_info,
@@ -160,6 +168,7 @@ class QuakeWindow(QuakeMixin, TabsMixin, FilesMixin, FormattingMixin, Correction
             self.lbl_zoom,
             self.lbl_eol,
             self.lbl_enc,
+            self.update_btn,
             self.usage,
             self.lbl_hotkey,
         ):
@@ -220,6 +229,7 @@ class QuakeWindow(QuakeMixin, TabsMixin, FilesMixin, FormattingMixin, Correction
         self.apply_settings()
         self.update_usage()
         self.restore_session()
+        self.init_updates()
         if not self.docs():
             self.new_tab()
         self._guard_plus = False
@@ -419,6 +429,7 @@ class QuakeWindow(QuakeMixin, TabsMixin, FilesMixin, FormattingMixin, Correction
 
         m.addSeparator()
         m.addAction(A("app.settings", "Paramètres…", self.open_settings, "Ctrl+,"))
+        m.addAction(A("app.update", "Rechercher les mises à jour…", lambda: self.check_updates(manual=True), ""))
         m.addAction(A("app.datadir", "Ouvrir le dossier des données (journal, session)", self.open_data_dir, ""))
         m.addAction(A("app.about", "À propos de QuakePad", self.about, ""))
         m.addSeparator()

@@ -13,6 +13,35 @@ Les notes **ne sont pas synchronisées** entre les deux.
 
 ---
 
+## 📥 Installation (recommandée)
+1. Ouvrez la page **[Releases](https://github.com/ScriptoriumII/QuakePad/releases/latest)** et téléchargez `QuakePad-Setup-X.Y.Z.exe`.
+2. Lancez-le : **aucun droit administrateur** n'est nécessaire (installation dans votre profil, `%LOCALAPPDATA%\Programs\QuakePad`).
+3. Options proposées : icône sur le Bureau, **ouvrir les `.txt`** (et `.md`, `.log`) avec QuakePad, lancement au démarrage de Windows.
+4. Raccourci dans le **menu Démarrer**. Désinstallation : Paramètres Windows → Applications (vos notes, dans `AppData\Roaming\QuakePad`, sont conservées).
+
+> ℹ️ **Fichiers .txt par défaut** : Windows interdit aux programmes de s'imposer comme application par défaut. L'installateur inscrit QuakePad dans « Ouvrir avec » et propose d'ouvrir la page *Applications par défaut* où un clic suffit.
+>
+> ⚠️ L'installateur n'est pas signé numériquement : Windows SmartScreen peut afficher « Windows a protégé votre ordinateur » → **Informations complémentaires** → **Exécuter quand même**. Chaque fichier publié est accompagné de son empreinte dans `SHA256SUMS.txt`.
+
+Une version **portable** (`QuakePad-X.Y.Z-portable.zip`, sans installation) est aussi publiée.
+
+### 🔄 Mises à jour automatiques
+QuakePad vérifie **une fois par jour** les nouvelles versions publiées sur GitHub (☰ → *Rechercher les mises à jour…* pour vérifier tout de suite ; désactivable dans Paramètres → Général). Quand une version est disponible, un bouton **⬆ Mise à jour X** apparaît dans la barre d'état :
+1. l'installateur est téléchargé **uniquement depuis GitHub** (HTTPS, hôtes vérifiés) ;
+2. son **empreinte SHA-256** est comparée à `SHA256SUMS.txt` — en cas de différence, rien n'est installé ;
+3. l'installation se fait en silence, puis QuakePad redémarre (session conservée).
+
+Lancé depuis les sources (`run.bat`), QuakePad signale la nouvelle version mais la mise à jour se fait par `git pull`.
+
+### 🚀 Publier une nouvelle version (mainteneur)
+1. Mettre à jour `APP_VERSION` dans `windows/quakepad/settings.py`.
+2. Créer une **étiquette annotée** (son message devient les notes de version) et la pousser :
+   ```bash
+   git tag -a v1.7.0 -m "Nouveautés…"
+   git push origin v1.7.0
+   ```
+3. GitHub Actions teste, construit l'installateur, calcule les empreintes et publie la Release.
+
 ## Application Windows
 
 ### Fonctionnalités
@@ -92,7 +121,7 @@ cd windows
 run.bat
 ```
 
-### Construire l'exécutable
+### Construire l'exécutable et l'installateur
 ```bat
 cd windows
 build.bat

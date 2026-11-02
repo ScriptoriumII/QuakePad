@@ -175,6 +175,8 @@ class SettingsDialog(QDialog):
         self.toolbar.setChecked(bool(s["show_toolbar"]))
         self.startup = QCheckBox("Lancer QuakePad au démarrage de Windows")
         self.startup.setChecked(bool(s["start_with_windows"]))
+        self.auto_update = QCheckBox("Rechercher automatiquement les mises à jour (une fois par jour)")
+        self.auto_update.setChecked(bool(s.get("auto_update", True)))
         general = QWidget()
         g = QFormLayout(general)
         g.addRow("Raccourci afficher/masquer", hk_row)
@@ -183,6 +185,7 @@ class SettingsDialog(QDialog):
         g.addRow("Police par défaut", f_row)
         g.addRow("", self.toolbar)
         g.addRow("", self.startup)
+        g.addRow("", self.auto_update)
         tabs.addTab(general, "Général")
 
         # --- Fenêtre ---------------------------------------------------------
@@ -372,6 +375,7 @@ class SettingsDialog(QDialog):
             "font_size": self.font_size.value(),
             "show_toolbar": self.toolbar.isChecked(),
             "start_with_windows": self.startup.isChecked(),
+            "auto_update": self.auto_update.isChecked(),
             "edge": self.edge.currentData(),
             "sizes": self._sizes,
             "opacity": self.opacity.value(),

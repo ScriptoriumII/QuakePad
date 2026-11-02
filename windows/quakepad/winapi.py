@@ -261,3 +261,17 @@ def unprotect(value: str) -> str:
         return ""
     out = _dpapi(raw, encrypt=False)
     return out.decode("utf-8") if out is not None else ""
+
+
+# --- Verrou « application en cours d'exécution » (détecté par l'installateur : AppMutex) -----
+APP_MUTEX = "ScriptoriumII.QuakePad.Running"
+_mutex_handle = None
+
+
+def hold_app_mutex() -> None:
+    """Crée le mutex nommé tant que QuakePad tourne (l'installateur demande alors de le fermer)."""
+    global _mutex_handle
+    if IS_WINDOWS and _mutex_handle is None:
+        kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+        kernel32.CreateMutexW.restype = wintypes.HANDLE
+        _mutex_handle = kernel32.CreateMutexW(None, False, APP_MUTEX)

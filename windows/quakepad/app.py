@@ -75,6 +75,7 @@ def main() -> int:
     if _send_to_running_instance([str(Path(f).resolve()) for f in files]):
         return 0
 
+    winapi.hold_app_mutex()
     from .window import QuakeWindow  # import tardif : démarrage plus rapide pour la 2e instance
 
     icon = QIcon(resource("quakepad.ico"))

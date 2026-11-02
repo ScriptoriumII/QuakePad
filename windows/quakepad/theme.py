@@ -153,6 +153,8 @@ QToolButton::menu-button:hover {{ background: {p["raised"]}; }}
 #StatusBar {{ background: {p["surface"]}; border-top: 1px solid {p["border"]}; }}
 #StatusBar QLabel {{ color: {p["muted"]}; font-size: 9pt; padding: 0 8px; }}
 #StatusBar QLabel#InfoLabel {{ color: {p["accent"]}; }}
+#UpdateBtn {{ color: {p["accent_fg"]}; background: {p["accent"]}; font-weight: 600; font-size: 9pt; padding: 1px 10px; border-radius: 8px; margin: 0 6px; }}
+#UpdateBtn:hover {{ background: {p["accent"]}; color: {p["accent_fg"]}; }}
 #UsageIndicator {{ border-left: 1px solid {p["border"]}; border-right: 1px solid {p["border"]}; }}
 #UsageIndicator:hover {{ background: {p["raised"]}; }}
 #UsageIndicator QLabel {{ padding: 0; }}

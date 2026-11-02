@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "QuakePad"
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.7.0"
 SECRET_KEYS = ("anthropic_key", "openai_key")
 MERGED_DICTS = ("hotkey", "shortcuts", "ai_keys", "ai_models", "ai_quotas")
 
@@ -60,6 +60,9 @@ DEFAULTS: dict = {
     "openai_key": "",
     "openai_model": "mistral-nemo",
     "start_with_windows": False,
+    "auto_update": True,  # vérifier les nouvelles versions une fois par jour
+    "last_update_check": 0,
+    "skipped_version": "",
     "first_run": True,
 }
 

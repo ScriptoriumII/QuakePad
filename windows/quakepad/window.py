@@ -12,7 +12,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QDialog, QFileDialog, QGridLayout, QHBoxLayout, QInputDialog,
-    QLabel, QLayout, QMenu, QMessageBox, QSizePolicy, QSystemTrayIcon, QTabBar, QTabWidget, QTextEdit,
+    QLabel, QLayout, QLineEdit, QMenu, QMessageBox, QSizePolicy, QSystemTrayIcon, QTabBar, QTabWidget, QTextEdit,
     QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -145,6 +145,10 @@ class QuakeWindow(QWidget):
         bar.setExpanding(False)
         bar.setElideMode(Qt.TextElideMode.ElideMiddle)
         bar.tabMoved.connect(self._keep_plus_last)
+        bar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        bar.customContextMenuRequested.connect(self._tab_context_menu)
+        bar.tabBarDoubleClicked.connect(lambda i: self.rename_tab(i) if isinstance(self.tabs.widget(i), Document) else None)
+        self._rename_edit = None
         self._plus = QWidget()
         self._guard_plus = True  # pas de création automatique pendant l'initialisation
         self.tabs.addTab(self._plus, "")
@@ -867,6 +871,113 @@ class QuakeWindow(QWidget):
         self._refresh_tab(doc)
         return doc
 
+    # --- Menu contextuel et renommage des onglets ---------------------------
+    def _tab_context_menu(self, pos) -> None:
+        bar = self.tabs.tabBar()
+        index = bar.tabAt(pos)
+        doc = self.tabs.widget(index)
+        if not isinstance(doc, Document):
+            return
+        menu = QMenu(self)
+        menu.addAction("Renommer l'onglet…", lambda: self.rename_tab(index))
+        if doc.custom_title:
+            menu.addAction("Rétablir le nom d'origine", lambda: self._set_tab_title(doc, ""))
+        menu.addSeparator()
+        menu.addAction("Nouvel onglet", self.new_tab)
+        menu.addAction("Dupliquer l'onglet", lambda: self.duplicate_tab(doc))
+        menu.addSeparator()
+        if doc.path:
+            menu.addAction("Copier le chemin du fichier", lambda: QApplication.clipboard().setText(doc.path))
+            menu.addAction("Ouvrir le dossier", lambda: self._reveal(doc.path))
+            menu.addSeparator()
+        menu.addAction("Fermer l'onglet", lambda: self.close_tab(self.tabs.indexOf(doc)))
+        others = [d for d in self.docs() if d is not doc]
+        a = menu.addAction("Fermer les autres onglets", lambda: self._close_many(others))
+        a.setEnabled(bool(others))
+        right = self.docs()[self.docs().index(doc) + 1:]
+        a = menu.addAction("Fermer les onglets à droite", lambda: self._close_many(right))
+        a.setEnabled(bool(right))
+        menu.exec(bar.mapToGlobal(pos))
+        menu.deleteLater()
+
+    def rename_tab(self, index: int) -> None:
+        """Renommage directement dans l'onglet (Entrée = valider, Échap = annuler, vide = nom d'origine)."""
+        doc = self.tabs.widget(index)
+        if not isinstance(doc, Document):
+            return
+        self.tabs.setCurrentIndex(index)
+        bar = self.tabs.tabBar()
+        rect = bar.tabRect(index).adjusted(8, 6, -30, -4)
+        edit = QLineEdit(doc.title(), bar)
+        edit.setObjectName("TabRename")
+        edit.setGeometry(rect)
+        edit.selectAll()
+        edit.show()
+        edit.setFocus()
+        self._rename_edit = edit
+        done = {"v": False}
+
+        def finish(commit: bool) -> None:
+            if done["v"]:
+                return
+            done["v"] = True
+            if commit:
+                text = edit.text().strip()
+                default = Path(doc.path).name if doc.path else doc.untitled_name
+                self._set_tab_title(doc, "" if text in ("", default) else text)
+            edit.deleteLater()
+            self._rename_edit = None
+            doc.setFocus()
+
+        class _Keys(QObject):
+            def eventFilter(self_, obj, ev):  # noqa: N802
+                if ev.type() == QEvent.Type.ShortcutOverride and ev.key() == Qt.Key.Key_Escape:
+                    ev.accept()  # Échap annule le renommage au lieu de masquer la fenêtre
+                    return True
+                if ev.type() == QEvent.Type.KeyPress and ev.key() == Qt.Key.Key_Escape:
+                    finish(False)
+                    return True
+                if ev.type() == QEvent.Type.FocusOut:
+                    finish(True)
+                return False
+
+        keys = _Keys(edit)
+        edit.installEventFilter(keys)
+        edit.returnPressed.connect(lambda: finish(True))
+
+    def _set_tab_title(self, doc: Document, title: str) -> None:
+        doc.custom_title = title
+        self._refresh_tab(doc)
+        self._schedule_session()
+
+    def duplicate_tab(self, doc: Document) -> None:
+        copy = self.new_tab()
+        if doc.rich:
+            copy.setHtml(doc.toHtml())
+            copy.rich = True
+        else:
+            copy.setPlainText(doc.toPlainText())
+        copy.custom_title = f"{doc.title()} (copie)"
+        copy.document().setModified(True)
+        self._refresh_tab(copy)
+
+    def _close_many(self, docs: list) -> None:
+        for d in list(docs):
+            i = self.tabs.indexOf(d)
+            if i >= 0:
+                self.close_tab(i)
+
+    @staticmethod
+    def _reveal(path: str) -> None:
+        import subprocess
+
+        if winapi.IS_WINDOWS:
+            subprocess.Popen(["explorer", "/select,", str(Path(path))])
+        else:
+            from PySide6.QtCore import QUrl
+            from PySide6.QtGui import QDesktopServices
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(path).parent)))
+
     def _keep_plus_last(self, _from: int, _to: int) -> None:
         last = self.tabs.count() - 1
         i = self.tabs.indexOf(self._plus)
@@ -880,7 +991,8 @@ class QuakeWindow(QWidget):
         if i < 0:
             return
         self.tabs.setTabText(i, ("● " if doc.is_modified() else "") + doc.title())
-        self.tabs.setTabToolTip(i, doc.path or doc.title())
+        tip = doc.path or doc.untitled_name
+        self.tabs.setTabToolTip(i, f"{tip}\nClic droit : renommer, dupliquer, fermer…")
         if doc is self.current():
             self._update_status()
 
@@ -1301,7 +1413,7 @@ class QuakeWindow(QWidget):
             if d.is_empty_untitled():
                 continue
             entry = {
-                "path": d.path, "untitled": d.untitled_name, "encoding": d.encoding, "eol": d.eol,
+                "path": d.path, "untitled": d.untitled_name, "title": d.custom_title, "encoding": d.encoding, "eol": d.eol,
                 "modified": d.is_modified(), "rich": d.rich, "cursor": d.textCursor().position(),
             }
             if d.is_modified() or not d.path:
@@ -1324,6 +1436,7 @@ class QuakeWindow(QWidget):
         for t in data.get("tabs", []):
             doc = self.new_tab(focus=False)
             doc.untitled_name = t.get("untitled") or doc.untitled_name
+            doc.custom_title = t.get("title") or ""
             path = t.get("path")
             try:
                 if "html" in t:

@@ -20,7 +20,7 @@ Les notes **ne sont pas synchronisées** entre les deux.
 - **Redimensionnable** en tirant ses bords ; la taille est **mémorisée pour chaque position** et retrouvée au prochain lancement.
 - **Raccourci global** configurable, indépendant de la disposition clavier (AZERTY/QWERTY).
 - **Se réduit quand on clique sur une autre fenêtre** (désactivable, ou bouton 📌 pour épingler).
-- **Onglets** avec un onglet **« + »** accolé pour créer une note d'un clic ; session restaurée (même non enregistrée, images comprises).
+- **Onglets** avec un bouton **« ＋ Nouvel onglet »** accolé ; **clic droit sur un onglet** : renommer (ou double-clic), dupliquer, copier le chemin, ouvrir le dossier, fermer / fermer les autres / fermer à droite ; session restaurée (même non enregistrée, images comprises).
 - **Barre de mise en forme** : taille du texte (A−, liste, A+), gras, italique, souligné, barré, couleur, listes, **tableau** (et ajout/suppression de lignes/colonnes), **image**, effacer la mise en forme.
 - **Photos** : bouton image, copier-coller (capture d'écran comprise) ou glisser-déposer ; redimensionnables au clic droit (25/50/75/100 %). Elles sont intégrées au document.
 - **Correction automatique par IA** (icône ✦ ou Ctrl+F7) : l'IA corrige orthographe, grammaire, accords et ponctuation **sans reformuler**, en conservant gras, tailles, images et tableaux. Passages corrigés surlignés en vert, **Ctrl+Z annule tout**. Avec une sélection, seule la sélection est corrigée. Au choix : **Claude** (API Anthropic, modèle `claude-haiku-5-5` par défaut) ou une **IA compatible OpenAI** (Ollama en local, LM Studio, Mistral…).

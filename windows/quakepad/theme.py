@@ -96,6 +96,7 @@ QTabBar::tab:selected {{ background: {p['bg']}; color: {p['fg']}; font-weight: 6
     padding: 4px 12px 4px 8px; border-radius: 8px;
     border: 1px solid {accent_line}; background: {accent_soft};
 }}
+#TabRename {{ border: 1px solid {p['accent']}; border-radius: 6px; padding: 1px 6px; background: {p['bg']}; font-weight: 600; }}
 #NewTabBtn:hover {{ background: {p['accent']}; color: {p['accent_fg']}; border-color: {p['accent']}; }}
 
 /* ---------- Boutons plats ---------- */

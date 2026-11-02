@@ -70,6 +70,7 @@ class Document(QTextEdit):
         self.encoding = "utf-8"
         self.eol = "\r\n"
         self.untitled_name = untitled_name
+        self.custom_title = ""  # nom choisi par l'utilisateur pour l'onglet (prioritaire)
         self.rich = False  # contient mise en forme / images / tableaux
         self.issues: list[SpellIssue] = []
         self._flash: list[tuple[int, int]] = []
@@ -81,6 +82,8 @@ class Document(QTextEdit):
 
     # --- Identité -------------------------------------------------------
     def title(self) -> str:
+        if self.custom_title:
+            return self.custom_title
         return Path(self.path).name if self.path else self.untitled_name
 
     @property

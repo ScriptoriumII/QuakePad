@@ -30,6 +30,7 @@ PROVIDERS = {
         "base": "https://generativelanguage.googleapis.com/v1beta/openai",
         "model": "gemini-3.8-flash", "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite"],
         "key_url": "https://aistudio.google.com/api-keys", "key_hint": "AIza…",
+        "quota_url": "https://ai.google.dev/gemini-api/docs/rate-limits",
         "extra": {"reasoning_effort": "low"},  # la correction ne demande pas de réflexion poussée
         "note": "Gratuit, sans carte bancaire. En offre gratuite, Google peut utiliser les textes pour "
                 "améliorer ses produits (relecture humaine possible) : réservez-le aux notes non sensibles.",
@@ -39,6 +40,7 @@ PROVIDERS = {
         "base": "https://api.mistral.ai/v1",
         "model": "mistral-small-latest", "models": ["mistral-small-latest", "mistral-medium-latest", "mistral-large-latest"],
         "key_url": "https://console.mistral.ai/api-keys", "key_hint": "clé Mistral",
+        "quota_url": "https://console.mistral.ai/limits",
         "note": "Mode gratuit sans carte bancaire, excellente qualité en français. En gratuit, les textes "
                 "peuvent servir à améliorer les modèles : vérifiez l'option dans votre console Mistral.",
     },
@@ -156,8 +158,12 @@ def _post_json_once(url: str, payload: dict, headers: dict, timeout: int) -> dic
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8", "replace")
+            resp_headers = dict(resp.headers.items())
         try:
-            return json.loads(raw)
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                data["_headers"] = resp_headers  # en-têtes de quota (ex. Groq x-ratelimit-*)
+            return data
         except ValueError:
             hint = ""
             if "aistudio.google.com" in url or "console." in url or raw.lstrip().startswith("<"):
@@ -206,8 +212,24 @@ def _call(cfg: dict, user_text: str, timeout: int | None = None) -> str:
             if exc.status not in TRANSIENT:
                 raise
             last = exc
+    if last is not None and last.status == 429:
+        try:
+            from . import usage
+
+            usage.mark_exhausted(ep["id"])
+        except Exception:  # noqa: BLE001
+            pass
     tried = ", ".join(candidates[:3])
     raise AIError(f"{last} — modèles essayés : {tried}. Réessayez dans quelques minutes.", last.status if last else None)
+
+
+def _record(provider: str, model: str, tokens: int, data: dict) -> None:
+    try:
+        from . import usage
+
+        usage.record(provider, model, tokens, data.get("_headers") if isinstance(data, dict) else None)
+    except Exception:  # noqa: BLE001 — le suivi ne doit jamais faire échouer une correction
+        pass
 
 
 def _call_model(cfg: dict, user_text: str, timeout: int | None, model: str) -> str:
@@ -226,6 +248,8 @@ def _call_model(cfg: dict, user_text: str, timeout: int | None, model: str) -> s
         }, {"x-api-key": ep["key"], "anthropic-version": ANTHROPIC_VERSION}, timeout=timeout)
         if data.get("stop_reason") == "max_tokens":
             raise AIError("Réponse tronquée : sélectionnez une partie plus courte du texte.")
+        u = data.get("usage") or {}
+        _record(ep["id"], model, int(u.get("input_tokens", 0)) + int(u.get("output_tokens", 0)), data)
         return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
     # API compatible OpenAI (Gemini, Mistral, Ollama, Groq, OpenRouter, LM Studio…)
     if not ep["key"] and ep["id"] not in ("ollama", "openai"):
@@ -246,9 +270,12 @@ def _call_model(cfg: dict, user_text: str, timeout: int | None, model: str) -> s
         err = data["error"]
         raise AIError(f"Erreur du service IA : {err.get('message', err) if isinstance(err, dict) else err}")
     try:
-        return data["choices"][0]["message"]["content"] or ""
+        text = data["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError, TypeError) as exc:
         raise AIError("Réponse inattendue du serveur IA.") from exc
+    u = data.get("usage") or {}
+    _record(ep["id"], model, int(u.get("total_tokens") or (u.get("prompt_tokens", 0) + u.get("completion_tokens", 0))), data)
+    return text
 
 
 def _parse_array(text: str, expected: int) -> list[str]:

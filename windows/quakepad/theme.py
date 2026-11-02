@@ -130,6 +130,15 @@ QToolButton::menu-button:hover {{ background: {p['raised']}; }}
 #StatusBar {{ background: {p['surface']}; border-top: 1px solid {p['border']}; }}
 #StatusBar QLabel {{ color: {p['muted']}; font-size: 9pt; padding: 0 8px; }}
 #StatusBar QLabel#InfoLabel {{ color: {p['accent']}; }}
+#UsageIndicator {{ border-left: 1px solid {p['border']}; border-right: 1px solid {p['border']}; }}
+#UsageIndicator:hover {{ background: {p['raised']}; }}
+#UsageIndicator QLabel {{ padding: 0; }}
+#UsageIndicator[level="mid"] QLabel {{ color: #d29922; }}
+#UsageIndicator[level="high"] QLabel {{ color: {p['danger']}; font-weight: 600; }}
+#UsageBar {{ background: {p['raised']}; border: none; border-radius: 3px; }}
+#UsageBar::chunk {{ background: #2ea043; border-radius: 3px; }}
+#UsageIndicator[level="mid"] #UsageBar::chunk {{ background: #d29922; }}
+#UsageIndicator[level="high"] #UsageBar::chunk {{ background: {p['danger']}; }}
 
 /* ---------- Rechercher / remplacer ---------- */
 #FindBar {{ background: {p['surface']}; border-top: 1px solid {p['border']}; }}

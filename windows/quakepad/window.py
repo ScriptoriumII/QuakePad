@@ -5,14 +5,14 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QEasingCurve, QMarginsF, QPropertyAnimation, QRect, QSize, Qt, QTimer
+from PySide6.QtCore import Signal, QEvent, QObject, QEasingCurve, QMarginsF, QPropertyAnimation, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import (
     QAction, QColor, QCursor, QFont, QGuiApplication, QIcon, QKeySequence, QPageLayout,
     QPageSize, QPainter, QTextListFormat,
 )
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QDialog, QFileDialog, QGridLayout, QHBoxLayout, QInputDialog,
-    QLabel, QLayout, QLineEdit, QMenu, QMessageBox, QSizePolicy, QSystemTrayIcon, QTabBar, QTabWidget, QTextEdit,
+    QLabel, QLayout, QLineEdit, QMenu, QMessageBox, QProgressBar, QSizePolicy, QSystemTrayIcon, QTabBar, QTabWidget, QTextEdit,
     QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -115,6 +115,34 @@ class _DialogWatcher(QObject):
         return False
 
 
+class UsageIndicator(QWidget):
+    """Consommation IA du jour : « ✦ Gemini ▮▮▯ 12 % utilisé · 88 % libre » (clic = Paramètres)."""
+
+    clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("UsageIndicator")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(8, 0, 8, 0)
+        lay.setSpacing(6)
+        self.label = QLabel()
+        self.bar = QProgressBar()
+        self.bar.setObjectName("UsageBar")
+        self.bar.setRange(0, 1000)
+        self.bar.setTextVisible(False)
+        self.bar.setFixedSize(54, 6)
+        self.pct = QLabel()
+        self.pct.setMinimumWidth(self.pct.fontMetrics().horizontalAdvance("100 % utilisé · 100 % libre") + 4)
+        for w in (self.label, self.bar, self.pct):
+            lay.addWidget(w)
+
+    def mousePressEvent(self, e):  # noqa: N802
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+
+
 class QuakeWindow(QWidget):
     def __init__(self, settings: Settings, app_icon: QIcon):
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
@@ -212,12 +240,17 @@ class QuakeWindow(QWidget):
         self.lbl_eol = QLabel()
         self.lbl_enc = QLabel()
         self.lbl_hotkey = QLabel()
+        self.usage = UsageIndicator()
+        self.usage.clicked.connect(lambda: self.open_settings(tab=3))
         sl.addWidget(self.lbl_path, 1)
         for w in (self.lbl_info, self.lbl_pos, self.lbl_len, self.lbl_zoom, self.lbl_eol, self.lbl_enc,
-                  self.lbl_hotkey):
+                  self.usage, self.lbl_hotkey):
             sl.addWidget(w)
         self._info_timer = QTimer(self, singleShot=True, interval=8000)
         self._info_timer.timeout.connect(lambda: self.lbl_info.setText(""))
+        self._usage_timer = QTimer(self, interval=30_000)  # passage à minuit, quotas serveur…
+        self._usage_timer.timeout.connect(self.update_usage)
+        self._usage_timer.start()
 
         self._build_actions()
         self._build_format_bar()
@@ -267,6 +300,7 @@ class QuakeWindow(QWidget):
             pass
 
         self.apply_settings()
+        self.update_usage()
         self.restore_session()
         if not self.docs():
             self.new_tab()
@@ -610,6 +644,7 @@ class QuakeWindow(QWidget):
             self.settings.save()
             self.act_toolbar.setChecked(self.settings["show_toolbar"])
         self.apply_settings()
+        self.update_usage()
 
     def _set_toolbar(self, on: bool) -> None:
         self.settings["show_toolbar"] = on
@@ -1172,6 +1207,7 @@ class QuakeWindow(QWidget):
         self.ai.correct(doc, blocks, self._ai_cfg)
 
     def _ai_finish(self, doc: Document) -> None:
+        self.update_usage()
         self._ai_busy = False
         self._actions["spell.ai"][0].setEnabled(True)
         if doc in self.docs():
@@ -1387,6 +1423,51 @@ class QuakeWindow(QWidget):
             self._info_timer.stop()
         else:
             self._info_timer.start()
+
+    def update_usage(self) -> None:
+        """Rafraîchit l'indicateur de consommation de l'IA sélectionnée."""
+        from . import usage
+
+        ep = resolve_ai(self.settings)
+        pid = ep["id"]
+        name = ep["meta"]["label"].split(" —")[0].replace("Autre service compatible OpenAI…", "IA")
+        name = name.replace("Google ", "")
+        if pid == "ollama":
+            self.usage.label.setText(f"✦ {name}")
+            self.usage.bar.hide()
+            self.usage.pct.setText("local · illimité")
+            self.usage.setToolTip("IA locale : aucun quota.")
+            self.usage.setProperty("level", "ok")
+        else:
+            quota = int((self.settings.get("ai_quotas") or {}).get(pid, 0))
+            st = usage.status(pid, quota)
+            self.usage.label.setText(f"✦ {name}")
+            tip = [f"{name} — aujourd'hui : {st['requests']} requête(s), {usage.tokens_label(st['tokens'])} jetons",
+                   f"Remise à zéro dans {st['reset']}"
+                   + (" (minuit, heure du Pacifique)" if pid == "gemini" else "")]
+            if st["pct_used"] is None:
+                self.usage.bar.hide()
+                self.usage.pct.setText(f"{st['requests']} req. aujourd'hui")
+                tip.append("Pour afficher un pourcentage, indiquez votre quota gratuit (requêtes/jour) "
+                           "dans Paramètres → Correction.")
+                level = "ok"
+            else:
+                used = st["pct_used"]
+                self.usage.bar.show()
+                self.usage.bar.setValue(int(used * 10))
+                if st["exhausted"]:
+                    self.usage.pct.setText("quota atteint")
+                else:
+                    self.usage.pct.setText(f"{used:.0f} % utilisé · {100 - used:.0f} % libre")
+                tip.append(f"Quota : {st['limit']} requêtes/jour (source : {st['source']})")
+                if st["source"] == "QuakePad":
+                    tip.append("Compté par QuakePad sur ce PC : l'usage du même projet ailleurs n'est pas inclus.")
+                level = "high" if used >= 90 else "mid" if used >= 70 else "ok"
+            self.usage.setToolTip("\n".join(tip) + "\n\nClic : paramètres de correction")
+            self.usage.setProperty("level", level)
+        for w in (self.usage, self.usage.pct, self.usage.bar):
+            w.style().unpolish(w)
+            w.style().polish(w)
 
     def _update_status(self) -> None:
         doc = self.current()

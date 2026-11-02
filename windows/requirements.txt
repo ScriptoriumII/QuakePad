@@ -1,1 +1,2 @@
 PySide6>=6.6
+tzdata  # fuseaux horaires sous Windows (remise à zéro du quota Gemini à minuit, heure du Pacifique)

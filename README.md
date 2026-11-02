@@ -44,6 +44,8 @@ Les notes **ne sont pas synchronisées** entre les deux.
 | **Ollama** | Gratuit, local | `mistral-nemo` | Rien ne quitte le PC |
 | **Autre (compatible OpenAI)** | Selon le service | — | Groq, OpenRouter, LM Studio… : saisir l'adresse **de l'API** (`…/v1`) |
 
+**Consommation du jour** dans la barre d'état (à côté du raccourci) : « ✦ Gemini ▬ 12 % utilisé · 88 % libre », vert / orange (70 %) / rouge (90 %), clic = paramètres. Gemini ne publie pas le quota restant par API : QuakePad compte ses propres requêtes (remise à zéro à minuit, heure du Pacifique) et calcule le pourcentage à partir du **quota gratuit** saisi dans Paramètres → Correction (visible dans Google AI Studio). Pour Groq, le quota restant est lu directement dans les réponses du serveur. Une erreur 429 affiche « quota atteint ».
+
 Chaque fournisseur garde sa propre clé et son modèle ; les clés sont **chiffrées avec votre compte Windows (DPAPI)** dans `settings.json`.
 
 Garde-fous : un paragraphe trop réécrit (moins de 60 % de similarité) ou dont l'IA change le nombre d'images est ignoré ; si l'IA renvoie un nombre de paragraphes différent, rien n'est modifié.

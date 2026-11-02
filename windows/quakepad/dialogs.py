@@ -231,6 +231,17 @@ class SettingsDialog(QDialog):
         af.addRow(self.ai_key_label, key_row)
         self.ai_model = QComboBox(editable=True)
         af.addRow("Modèle", self.ai_model)
+        self._ai_quotas = {k: int(v) for k, v in dict(s.get("ai_quotas", {})).items()}
+        self.ai_quota = QSpinBox(minimum=0, maximum=10_000_000, singleStep=50)
+        self.ai_quota.setSpecialValueText("Inconnu — afficher seulement le compteur")
+        self.ai_quota.setSuffix(" requêtes / jour")
+        self.quota_btn = QPushButton("Voir mes limites…")
+        self.quota_btn.clicked.connect(self._open_quota_page)
+        quota_row = QHBoxLayout()
+        quota_row.addWidget(self.ai_quota, 1)
+        quota_row.addWidget(self.quota_btn)
+        self.quota_label = QLabel("Quota gratuit")
+        af.addRow(self.quota_label, quota_row)
         self.openai_base = QLineEdit(s["openai_base"])
         self.openai_base.setPlaceholderText("https://api.exemple.com/v1")
         self.base_label = QLabel("Adresse de l'API")
@@ -330,6 +341,7 @@ class SettingsDialog(QDialog):
     def _store_provider(self, pid: str) -> None:
         self._ai_keys[pid] = self.ai_key.text().strip()
         self._ai_models[pid] = self.ai_model.currentText().strip()
+        self._ai_quotas[pid] = self.ai_quota.value()
 
     def _load_provider(self, pid: str) -> None:
         meta = self._providers[pid]
@@ -344,12 +356,24 @@ class SettingsDialog(QDialog):
         self.key_btn.setText("Télécharger Ollama…" if pid == "ollama" else "Obtenir une clé…")
         self.ai_key_label.setText("Clé API (facultative)" if pid in ("ollama", "openai") else "Clé API")
         self.ai_note.setText(f"<small>{meta['note']}</small>")
+        self.ai_quota.setValue(int(self._ai_quotas.get(pid, 0)))
+        local = pid == "ollama"
+        self._ai_form.setRowVisible(self.quota_label, not local)
+        self.quota_btn.setVisible(bool(meta.get("quota_url")))
         self.test_result.setText("")
 
     def _ai_provider_changed(self) -> None:
         self._store_provider(self._ai_current)
         self._ai_current = self.ai_provider.currentData()
         self._load_provider(self._ai_current)
+
+    def _open_quota_page(self) -> None:
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        url = self._providers[self._ai_current].get("quota_url")
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
 
     def _open_key_page(self) -> None:
         from PySide6.QtCore import QUrl
@@ -367,6 +391,7 @@ class SettingsDialog(QDialog):
             "ai_provider": self._ai_current,
             "ai_keys": keys,
             "ai_models": models,
+            "ai_quotas": {k: v for k, v in self._ai_quotas.items() if v},
             "anthropic_key": self._ai_keys.get("anthropic", ""),
             "anthropic_model": self._ai_models.get("anthropic") or DEFAULTS["anthropic_model"],
             "openai_base": self.openai_base.text().strip() or DEFAULTS["openai_base"],

@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "QuakePad"
-APP_VERSION = "1.4.2"
+APP_VERSION = "1.5.0"
 SECRET_KEYS = ("anthropic_key", "openai_key")
 
 # Scan code 0x29 = touche située sous Échap (« ² » en AZERTY, « ` » en QWERTY),
@@ -51,6 +51,7 @@ DEFAULTS: dict = {
     "ai_provider": "gemini",  # gemini | mistral | anthropic | ollama | openai (autre)
     "ai_keys": {},  # fournisseur -> clé (chiffrée DPAPI dans le fichier)
     "ai_models": {},  # fournisseur -> modèle choisi
+    "ai_quotas": {},  # fournisseur -> quota gratuit (requêtes/jour) pour le pourcentage d'usage
     "anthropic_key": "",  # chiffrée avec DPAPI (compte Windows) dans le fichier
     "anthropic_model": "claude-haiku-5-5",
     "openai_base": "http://localhost:11434/v1",
@@ -86,7 +87,7 @@ class Settings(dict):
             if "sizes" not in data and "height_pct" in data:
                 s["sizes"]["top"] = {"depth": data.get("height_pct", 45), "span": data.get("width_pct", 100)}
             for key, value in data.items():
-                if key in ("hotkey", "shortcuts", "ai_keys", "ai_models") and isinstance(value, dict):
+                if key in ("hotkey", "shortcuts", "ai_keys", "ai_models", "ai_quotas") and isinstance(value, dict):
                     s[key].update(value)
                 elif key == "sizes" and isinstance(value, dict):
                     for edge, size in value.items():

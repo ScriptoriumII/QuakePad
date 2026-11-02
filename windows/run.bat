@@ -7,5 +7,6 @@ if not exist .venv (
     pip install -r requirements.txt
 ) else (
     call .venv\Scripts\activate.bat
+    pip install -q -r requirements.txt
 )
 start "" pythonw run_quakepad.py %*

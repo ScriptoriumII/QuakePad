@@ -1,4 +1,5 @@
 """Boîtes de dialogue : paramètres (raccourci global, fenêtre, raccourcis, correction) et tableau."""
+
 from __future__ import annotations
 
 import copy
@@ -6,17 +7,41 @@ import copy
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFontComboBox, QFormLayout, QGroupBox,
-    QHBoxLayout, QHeaderView, QKeySequenceEdit, QLabel, QLineEdit, QMessageBox, QPushButton, QSlider,
-    QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFontComboBox,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QKeySequenceEdit,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSlider,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from .settings import DEFAULTS, EDGES, SCANCODE_UNDER_ESC
 from .theme import THEMES
 
 _MODIFIER_KEYS = {
-    Qt.Key.Key_Control, Qt.Key.Key_Shift, Qt.Key.Key_Alt, Qt.Key.Key_Meta,
-    Qt.Key.Key_AltGr, Qt.Key.Key_Super_L, Qt.Key.Key_Super_R,
+    Qt.Key.Key_Control,
+    Qt.Key.Key_Shift,
+    Qt.Key.Key_Alt,
+    Qt.Key.Key_Meta,
+    Qt.Key.Key_AltGr,
+    Qt.Key.Key_Super_L,
+    Qt.Key.Key_Super_R,
 }
 
 
@@ -48,8 +73,13 @@ class HotkeyEdit(QLineEdit):
         parts = [p for p, on in (("Ctrl", ctrl), ("Alt", alt), ("Maj", shift), ("Win", win)) if on]
         label = "+".join(parts + [name.upper() if len(name) == 1 else name])
         self.spec = {
-            "ctrl": ctrl, "alt": alt, "shift": shift, "win": win,
-            "vk": int(e.nativeVirtualKey()), "scancode": int(e.nativeScanCode()), "label": label,
+            "ctrl": ctrl,
+            "alt": alt,
+            "shift": shift,
+            "win": win,
+            "vk": int(e.nativeVirtualKey()),
+            "scancode": int(e.nativeScanCode()),
+            "label": label,
         }
         self.setText(label)
         self.changed.emit(self.spec)
@@ -180,8 +210,13 @@ class SettingsDialog(QDialog):
         w.addRow("Position", self.edge)
         w.addRow(self.depth_lbl, self.depth)
         w.addRow(self.span_lbl, self.span)
-        w.addRow("", QLabel("<small>Astuce : tirez directement les bords de la fenêtre ; "
-                            "la taille est mémorisée pour chaque position.</small>"))
+        w.addRow(
+            "",
+            QLabel(
+                "<small>Astuce : tirez directement les bords de la fenêtre ; "
+                "la taille est mémorisée pour chaque position.</small>"
+            ),
+        )
         w.addRow("Opacité", op_row)
         w.addRow("Animation", self.anim)
         w.addRow("", self.autohide)
@@ -191,8 +226,10 @@ class SettingsDialog(QDialog):
         self.shortcuts = ShortcutTable(actions)
         sc = QWidget()
         sl = QVBoxLayout(sc)
-        hint = QLabel("Cliquez sur un raccourci puis appuyez sur la nouvelle combinaison. "
-                      "✕ pour le supprimer, ↺ pour revenir au défaut.")
+        hint = QLabel(
+            "Cliquez sur un raccourci puis appuyez sur la nouvelle combinaison. "
+            "✕ pour le supprimer, ↺ pour revenir au défaut."
+        )
         hint.setWordWrap(True)
         sl.addWidget(hint)
         sl.addWidget(self.shortcuts)
@@ -267,15 +304,23 @@ class SettingsDialog(QDialog):
         lf = QFormLayout(lt_box)
         self.spell_server = QLineEdit(s["spell_server"])
         self.spell_lang = QComboBox()
-        for code, label in (("fr", "Français"), ("auto", "Détection automatique"), ("en-US", "Anglais (US)"),
-                            ("en-GB", "Anglais (GB)"), ("de-DE", "Allemand"), ("es", "Espagnol"), ("it", "Italien")):
+        for code, label in (
+            ("fr", "Français"),
+            ("auto", "Détection automatique"),
+            ("en-US", "Anglais (US)"),
+            ("en-GB", "Anglais (GB)"),
+            ("de-DE", "Allemand"),
+            ("es", "Espagnol"),
+            ("it", "Italien"),
+        ):
             self.spell_lang.addItem(label, code)
         self.spell_lang.setCurrentIndex(max(0, self.spell_lang.findData(s["spell_language"])))
         lf.addRow("Langue", self.spell_lang)
         lf.addRow("Serveur", self.spell_server)
         note = QLabel(
             "<small>Envoie le texte au serveur indiqué. Serveur public gratuit mais limité ; pour rester en "
-            "interne : Docker <code>erikvl87/languagetool</code> puis <code>http://serveur:8010/v2/check</code>.</small>")
+            "interne : Docker <code>erikvl87/languagetool</code> puis <code>http://serveur:8010/v2/check</code>.</small>"
+        )
         note.setWordWrap(True)
         lf.addRow(note)
         sv.addWidget(lt_box)
@@ -312,8 +357,9 @@ class SettingsDialog(QDialog):
     def _accept(self) -> None:
         dup = self.shortcuts.conflicts()
         if dup:
-            QMessageBox.warning(self, "Raccourcis en double",
-                                "Ces raccourcis sont utilisés deux fois :\n\n" + "\n".join(dup))
+            QMessageBox.warning(
+                self, "Raccourcis en double", "Ces raccourcis sont utilisés deux fois :\n\n" + "\n".join(dup)
+            )
             return
         self.accept()
 
@@ -413,8 +459,10 @@ class SettingsDialog(QDialog):
         start = time.monotonic()
         self._test_timer = QTimer(self, interval=500)
         self._test_timer.timeout.connect(
-            lambda: self.test_result.setText(f"Test en cours… {int(time.monotonic() - start)} s "
-                                             f"(maximum {TEST_TIMEOUT} s)"))
+            lambda: self.test_result.setText(
+                f"Test en cours… {int(time.monotonic() - start)} s (maximum {TEST_TIMEOUT} s)"
+            )
+        )
         self._test_timer.start()
         self.test_result.setText("Test en cours…")
 

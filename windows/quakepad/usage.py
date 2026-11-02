@@ -6,6 +6,7 @@
 - Groq (et les API de style OpenAI qui le font) renvoient x-ratelimit-limit-requests /
   x-ratelimit-remaining-requests : la valeur du serveur est alors prioritaire.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,7 +17,10 @@ from datetime import datetime, timedelta, timezone
 from .settings import app_dir
 
 _LOCK = threading.Lock()
-_PATH = app_dir() / "usage.json"
+
+
+def _path():
+    return app_dir() / "usage.json"
 
 
 def _pacific_now() -> datetime:
@@ -46,15 +50,15 @@ def reset_in(provider: str) -> str:
 
 def _load() -> dict:
     try:
-        return json.loads(_PATH.read_text(encoding="utf-8"))
+        return json.loads(_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
 
 def _save(data: dict) -> None:
-    tmp = _PATH.with_suffix(".tmp")
+    tmp = _path().with_suffix(".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, _PATH)
+    os.replace(tmp, _path())
 
 
 def _entry(data: dict, provider: str) -> dict:
@@ -77,9 +81,11 @@ def record(provider: str, model: str, tokens: int, headers: dict | None) -> None
         h = {k.lower(): v for k, v in (headers or {}).items()}
         try:
             if "x-ratelimit-limit-requests" in h and "x-ratelimit-remaining-requests" in h:
-                e["server"] = {"limit": int(float(h["x-ratelimit-limit-requests"])),
-                               "remaining": int(float(h["x-ratelimit-remaining-requests"])),
-                               "reset": h.get("x-ratelimit-reset-requests", "")}
+                e["server"] = {
+                    "limit": int(float(h["x-ratelimit-limit-requests"])),
+                    "remaining": int(float(h["x-ratelimit-remaining-requests"])),
+                    "reset": h.get("x-ratelimit-reset-requests", ""),
+                }
         except ValueError:
             pass
         _save(data)
@@ -100,12 +106,20 @@ def status(provider: str, daily_quota: int = 0) -> dict:
         e = dict(data.get(provider) or {})
     if e.get("day") != day_key(provider):
         e = {"requests": 0, "tokens": 0}
-    out = {"requests": e.get("requests", 0), "tokens": e.get("tokens", 0), "pct_used": None,
-           "source": "", "reset": reset_in(provider), "limit": 0, "exhausted": bool(e.get("exhausted"))}
+    out = {
+        "requests": e.get("requests", 0),
+        "tokens": e.get("tokens", 0),
+        "pct_used": None,
+        "source": "",
+        "reset": reset_in(provider),
+        "limit": 0,
+        "exhausted": bool(e.get("exhausted")),
+    }
     srv = e.get("server")
     if srv and srv.get("limit"):
-        out.update(limit=srv["limit"], source="serveur",
-                   pct_used=100 * (srv["limit"] - srv["remaining"]) / srv["limit"])
+        out.update(
+            limit=srv["limit"], source="serveur", pct_used=100 * (srv["limit"] - srv["remaining"]) / srv["limit"]
+        )
     elif daily_quota:
         out.update(limit=daily_quota, source="QuakePad", pct_used=100 * out["requests"] / daily_quota)
     if out["exhausted"]:

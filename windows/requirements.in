@@ -1,0 +1,3 @@
+# Dépendances d'exécution (versions minimales) ; le fichier figé est requirements.txt
+PySide6-Essentials==6.12.0  # Core, Gui, Widgets, Svg, PrintSupport, Network (sans WebEngine : bien plus léger)
+tzdata==2026.6

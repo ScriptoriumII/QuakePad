@@ -3,6 +3,7 @@
 Par défaut : serveur public https://api.languagetool.org (le texte y est envoyé).
 Un serveur LanguageTool auto-hébergé peut être configuré dans les Paramètres.
 """
+
 from __future__ import annotations
 
 import json
@@ -13,6 +14,7 @@ import urllib.request
 
 from PySide6.QtCore import QObject, Signal
 
+from . import netsec
 from .editor import SpellIssue
 
 CHUNK = 15000  # caractères par requête (limite du serveur public : 20 Ko)
@@ -41,24 +43,31 @@ def check_text(text: str, server: str, language: str) -> list[SpellIssue]:
         if params["language"] == "auto":
             params["preferredVariants"] = "fr-FR,en-US"
         data = urllib.parse.urlencode(params).encode()
-        req = urllib.request.Request(server, data=data, headers={
-            "Accept": "application/json", "User-Agent": "QuakePad",
-            "Content-Type": "application/x-www-form-urlencoded",
-        })
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        req = urllib.request.Request(
+            server,
+            data=data,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "QuakePad",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+        )
+        with netsec.open_url(req, 20, sends_secret=False) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
         # Les positions de LanguageTool et de Qt sont toutes deux en UTF-16 :
         # on ajoute seulement le décalage du morceau, converti en UTF-16.
         chunk_utf16_offset = len(text[:offset].encode("utf-16-le")) // 2
         for m in payload.get("matches", []):
             issue_type = (m.get("rule") or {}).get("issueType", "")
-            issues.append(SpellIssue(
-                start=chunk_utf16_offset + int(m["offset"]),
-                length=int(m["length"]),
-                message=m.get("message") or m.get("shortMessage") or "Erreur",
-                replacements=[r["value"] for r in m.get("replacements", [])[:8]],
-                kind="spelling" if issue_type == "misspelling" else "grammar",
-            ))
+            issues.append(
+                SpellIssue(
+                    start=chunk_utf16_offset + int(m["offset"]),
+                    length=int(m["length"]),
+                    message=m.get("message") or m.get("shortMessage") or "Erreur",
+                    replacements=[r["value"] for r in m.get("replacements", [])[:8]],
+                    kind="spelling" if issue_type == "misspelling" else "grammar",
+                )
+            )
     return issues
 
 

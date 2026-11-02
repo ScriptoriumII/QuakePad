@@ -1,4 +1,5 @@
 """Point d'entrée : instance unique, icône, lancement de la fenêtre Quake."""
+
 from __future__ import annotations
 
 import getpass
@@ -11,6 +12,9 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from . import winapi
+from .log import log
+from .log import set_notifier as log_set_notifier
+from .log import setup as log_setup
 from .settings import APP_NAME, Settings
 
 
@@ -42,6 +46,7 @@ def _send_to_running_instance(args: list[str]) -> bool:
 
 
 def main() -> int:
+    log_setup()
     argv = sys.argv[1:]
     hidden = "--hidden" in argv
     files = [a for a in argv if not a.startswith("--")]
@@ -62,6 +67,7 @@ def main() -> int:
 
     # Menus standards de Qt (clic droit : Copier, Coller…) en français
     from PySide6.QtCore import QLibraryInfo, QLocale, QTranslator
+
     translator = QTranslator(app)
     if translator.load(QLocale("fr_FR"), "qtbase", "_", QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)):
         app.installTranslator(translator)
@@ -78,10 +84,15 @@ def main() -> int:
 
     settings = Settings.load()
     win = QuakeWindow(settings, icon)
+    log_set_notifier(lambda msg: win.tray.showMessage(APP_NAME, msg, QSystemTrayIcon.MessageIcon.Warning, 5000))
 
     server = QLocalServer()
+    # Canal réservé au compte Windows courant : un autre utilisateur de la machine ne peut pas
+    # demander à QuakePad d'ouvrir des fichiers.
+    server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
     QLocalServer.removeServer(_server_name())
-    server.listen(_server_name())
+    if not server.listen(_server_name()):
+        log.warning("Canal d'instance unique indisponible : %s", server.errorString())
 
     def on_connection():
         sock = server.nextPendingConnection()
@@ -90,7 +101,7 @@ def main() -> int:
             msg = bytes(sock.readAll().data()).decode("utf-8", "replace")
             if msg.startswith("open\n"):
                 win.show_animated()
-                win.open_files([l for l in msg.split("\n")[1:] if l])
+                win.open_files([line for line in msg.split("\n")[1:] if line])
             else:
                 win.toggle()
 
@@ -110,7 +121,8 @@ def main() -> int:
             APP_NAME,
             f"QuakePad tourne dans la zone de notification.\n"
             f"Raccourci : {settings['hotkey'].get('label', '')} pour afficher / masquer.",
-            QSystemTrayIcon.MessageIcon.Information, 6000,
+            QSystemTrayIcon.MessageIcon.Information,
+            6000,
         )
     return app.exec()
 

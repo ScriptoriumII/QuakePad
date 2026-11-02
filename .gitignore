@@ -6,3 +6,5 @@ windows/dist/
 *.spec
 *.qp-tmp
 *.zip
+.pytest_cache/
+.ruff_cache/

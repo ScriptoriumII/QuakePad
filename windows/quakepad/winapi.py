@@ -2,8 +2,10 @@
 
 Tout est protégé par `IS_WINDOWS` pour que l'application reste testable ailleurs.
 """
+
 from __future__ import annotations
 
+import base64
 import sys
 
 from PySide6.QtCore import QAbstractNativeEventFilter, QCoreApplication, QObject, Signal
@@ -28,8 +30,15 @@ if IS_WINDOWS:
     user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
     user32.SetForegroundWindow.argtypes = [wintypes.HWND]
     user32.BringWindowToTop.argtypes = [wintypes.HWND]
-    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
-                                    ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    user32.SetWindowPos.argtypes = [
+        wintypes.HWND,
+        wintypes.HWND,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.UINT,
+    ]
     user32.SetWindowPos.restype = wintypes.BOOL
 
 WM_HOTKEY = 0x0312
@@ -140,8 +149,7 @@ def set_topmost(hwnd: int, on: bool, activate: bool = False) -> None:
     if not IS_WINDOWS or not hwnd:
         return
     flags = SWP_NOSIZE | SWP_NOMOVE | (0 if activate else SWP_NOACTIVATE)
-    user32.SetWindowPos(wintypes.HWND(hwnd), wintypes.HWND(HWND_TOPMOST if on else HWND_NOTOPMOST),
-                        0, 0, 0, 0, flags)
+    user32.SetWindowPos(wintypes.HWND(hwnd), wintypes.HWND(HWND_TOPMOST if on else HWND_NOTOPMOST), 0, 0, 0, 0, flags)
 
 
 def set_app_user_model_id(app_id: str) -> None:
@@ -189,49 +197,67 @@ def set_start_with_windows(enabled: bool) -> bool:
 
 
 # --- Chiffrement des secrets (DPAPI : lié au compte Windows de l'utilisateur) ---------
-_DPAPI_PREFIX = "dpapi:"
+# Protège contre la lecture du fichier par un autre compte ou sur un autre PC ; un programme
+# exécuté sous la même session Windows peut, lui, déchiffrer (limite normale de DPAPI).
+DPAPI_PREFIX = "dpapi:"
+_CRYPTPROTECT_UI_FORBIDDEN = 0x1
+
+if IS_WINDOWS:
+
+    class _BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    _crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
+    for _fn in (_crypt32.CryptProtectData, _crypt32.CryptUnprotectData):
+        _fn.argtypes = [
+            ctypes.POINTER(_BLOB),
+            ctypes.c_void_p,
+            ctypes.POINTER(_BLOB),
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            ctypes.POINTER(_BLOB),
+        ]
+        _fn.restype = wintypes.BOOL
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel32.LocalFree.restype = ctypes.c_void_p
+
+
+def _dpapi(data: bytes, encrypt: bool) -> bytes | None:
+    buf = ctypes.create_string_buffer(data, len(data))
+    blob_in = _BLOB(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)))
+    blob_out = _BLOB()
+    fn = _crypt32.CryptProtectData if encrypt else _crypt32.CryptUnprotectData
+    if not fn(ctypes.byref(blob_in), None, None, None, None, _CRYPTPROTECT_UI_FORBIDDEN, ctypes.byref(blob_out)):
+        return None
+    try:
+        return ctypes.string_at(blob_out.pbData, blob_out.cbData)
+    finally:
+        kernel32.LocalFree(ctypes.cast(blob_out.pbData, ctypes.c_void_p))
 
 
 def protect(value: str) -> str:
+    """Chiffre une chaîne (préfixe « dpapi: »). Hors Windows ou en cas d'échec : renvoie la valeur telle quelle."""
     if not value or not IS_WINDOWS:
         return value
-    import base64
+    out = _dpapi(value.encode("utf-8"), encrypt=True)
+    if out is None:
+        from .log import log
 
-    class BLOB(ctypes.Structure):
-        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
-
-    raw = value.encode("utf-8")
-    buf = ctypes.create_string_buffer(raw, len(raw))
-    blob_in = BLOB(len(raw), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)))
-    blob_out = BLOB()
-    crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
-    if not crypt32.CryptProtectData(ctypes.byref(blob_in), None, None, None, None, 0x1, ctypes.byref(blob_out)):
+        log.warning("Échec du chiffrement DPAPI (erreur Win32 %s)", ctypes.get_last_error())
         return value
-    try:
-        data = ctypes.string_at(blob_out.pbData, blob_out.cbData)
-    finally:
-        kernel32.LocalFree(blob_out.pbData)
-    return _DPAPI_PREFIX + base64.b64encode(data).decode("ascii")
+    return DPAPI_PREFIX + base64.b64encode(out).decode("ascii")
 
 
 def unprotect(value: str) -> str:
-    if not value or not value.startswith(_DPAPI_PREFIX):
+    """Déchiffre une valeur « dpapi: » ; renvoie "" si impossible (autre compte Windows, hors Windows)."""
+    if not value or not value.startswith(DPAPI_PREFIX):
         return value or ""
     if not IS_WINDOWS:
         return ""
-    import base64
-
-    class BLOB(ctypes.Structure):
-        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
-
-    raw = base64.b64decode(value[len(_DPAPI_PREFIX):])
-    buf = ctypes.create_string_buffer(raw, len(raw))
-    blob_in = BLOB(len(raw), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)))
-    blob_out = BLOB()
-    crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
-    if not crypt32.CryptUnprotectData(ctypes.byref(blob_in), None, None, None, None, 0x1, ctypes.byref(blob_out)):
-        return ""
     try:
-        return ctypes.string_at(blob_out.pbData, blob_out.cbData).decode("utf-8")
-    finally:
-        kernel32.LocalFree(blob_out.pbData)
+        raw = base64.b64decode(value[len(DPAPI_PREFIX) :], validate=True)
+    except ValueError:
+        return ""
+    out = _dpapi(raw, encrypt=False)
+    return out.decode("utf-8") if out is not None else ""

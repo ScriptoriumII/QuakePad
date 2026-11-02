@@ -1,0 +1,28 @@
+[project]
+name = "quakepad"
+version = "1.6.0"
+description = "Bloc-notes déroulant façon Quake pour Windows"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# E/W : style, F : erreurs (noms inconnus, imports inutiles), I : ordre des imports,
+# B : pièges courants, S : sécurité (équivalent Bandit), UP : syntaxe moderne
+select = ["E", "W", "F", "I", "B", "S", "UP"]
+ignore = [
+    "E501",   # longueur de ligne : gérée par le formateur
+    "S310",   # urlopen : schémas contrôlés par netsec.validate_url avant chaque appel
+    "S603",   # subprocess sans shell : liste d'arguments fixe (explorer /select)
+    "S607",   # explorer.exe est résolu par Windows
+    "B008",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S105", "S106", "B011"]  # assert et faux secrets autorisés dans les tests
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

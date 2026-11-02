@@ -1,4 +1,5 @@
 """Lecture / écriture de fichiers texte avec détection d'encodage et de fins de ligne."""
+
 from __future__ import annotations
 
 import codecs
@@ -14,12 +15,13 @@ ENCODINGS = {
 EOLS = {"\r\n": "Windows (CRLF)", "\n": "Unix (LF)", "\r": "Mac (CR)"}
 
 
-def detect_eol(raw: bytes) -> str:
-    if b"\r\n" in raw:
+def detect_eol(text: str) -> str:
+    """Fin de ligne dominante, détectée sur le texte décodé (fonctionne aussi en UTF-16)."""
+    if "\r\n" in text:
         return "\r\n"
-    if b"\n" in raw:
+    if "\n" in text:
         return "\n"
-    if b"\r" in raw:
+    if "\r" in text:
         return "\r"
     return "\r\n"
 
@@ -38,7 +40,7 @@ def read_text(path: str | Path) -> tuple[str, str, str]:
         except UnicodeDecodeError:
             enc = "cp1252"
     text = raw.decode(enc, errors="replace")
-    eol = detect_eol(raw)
+    eol = detect_eol(text)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     return text, enc, eol
 

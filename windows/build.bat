@@ -1,21 +1,32 @@
 @echo off
-REM Construit dist\QuakePad.exe (exécutable autonome, sans console)
+REM Construit dist\QuakePad.exe (executable autonome, sans console).
+REM Etapes : dependances verifiees (empreintes) -> analyse du code -> tests -> PyInstaller.
 setlocal
 cd /d "%~dp0"
 
-if not exist .venv (
+if not exist .venv\Scripts\python.exe (
     py -3 -m venv .venv || python -m venv .venv || goto :error
 )
-call .venv\Scripts\activate.bat || goto :error
-python -m pip install --upgrade pip >nul
-pip install -r requirements.txt pyinstaller || goto :error
+set PY=.venv\Scripts\python.exe
+%PY% -m pip install --disable-pip-version-check --require-hashes --no-deps -r requirements.txt -r requirements-dev.txt || goto :error
+copy /y requirements.txt .venv\installed-requirements.txt >nul
 
-pyinstaller --noconfirm --clean --onefile --windowed ^
+echo.
+echo === Analyse du code (ruff) ===
+%PY% -m ruff check quakepad tests || goto :error
+
+echo.
+echo === Tests (pytest) ===
+set QT_QPA_PLATFORM=offscreen
+%PY% -m pytest || goto :error
+set QT_QPA_PLATFORM=
+
+echo.
+echo === Construction de l'executable ===
+%PY% -m PyInstaller --noconfirm --clean --onefile --windowed ^
   --name QuakePad ^
   --icon assets\quakepad.ico ^
   --add-data "assets;assets" ^
-  --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.Qt3DCore ^
-  --exclude-module PySide6.QtQuick --exclude-module PySide6.QtQml ^
   run_quakepad.py || goto :error
 
 echo.

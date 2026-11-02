@@ -78,6 +78,14 @@ puis ☰ → Paramètres → Correction → `http://serveur:8010/v2/check`.
 
 > ⚠️ **Win+²** est déjà pris par Windows Terminal (mode Quake). Si le raccourci choisi est occupé, QuakePad l'indique dans une notification : changez-le dans **☰ → Paramètres**.
 
+### Sécurité et confidentialité
+- **Clés API et session chiffrées avec DPAPI** (liées à votre compte Windows) : le contenu des notes, y compris les onglets non enregistrés et les images, n'est jamais écrit en clair dans `%APPDATA%\QuakePad`. Une ancienne session en clair est chiffrée automatiquement au premier lancement.
+- **Adresses contrôlées** : seules `https://` (ou `http://` vers ce PC / le réseau local **sans clé**) sont acceptées ; une clé API n'est jamais envoyée en clair sur le réseau ; redirections refusées ; jamais de `file://`.
+- **Canal d'instance unique** réservé à votre compte Windows.
+- **Dépendances figées** (versions + empreintes SHA-256 vérifiées par `pip --require-hashes`), installées uniquement quand `requirements.txt` change.
+- **Journal** `quakepad.log` (☰ → Ouvrir le dossier des données) : erreurs et exceptions, clés API masquées automatiquement.
+- Limite connue : DPAPI protège contre la lecture du fichier par un autre compte ou sur un autre PC, pas contre un programme malveillant exécuté sous votre propre session.
+
 ### Lancer depuis les sources
 ```bat
 cd windows
@@ -89,7 +97,18 @@ run.bat
 cd windows
 build.bat
 ```
-Résultat : `windows\dist\QuakePad.exe` (fichier unique, sans console). Prérequis : Python 3.10+.
+Le script vérifie le code (ruff), lance les tests (pytest), puis produit `windows\dist\QuakePad.exe` (fichier unique, sans console). Prérequis : Python 3.10+.
+
+### Développement
+```bat
+cd windows
+.venv\Scripts\python.exe -m pip install --require-hashes --no-deps -r requirements.txt -r requirements-dev.txt
+set QT_QPA_PLATFORM=offscreen
+.venv\Scripts\python.exe -m pytest
+.venv\Scripts\python.exe -m ruff check quakepad tests
+```
+- Modules : `window.py` (assemblage, menus, thème) · `quake.py` (position, animation) · `tabs.py` · `files.py` · `formatting.py` · `correction.py` · `session.py` · `widgets.py` · `editor.py` · `ai.py` · `netsec.py` · `log.py` · `settings.py` · `winapi.py`.
+- Mettre à jour une dépendance : modifier `requirements.in` (ou `requirements-dev.in`) puis régénérer le fichier figé avec la commande indiquée en tête de `requirements.txt` (`uv pip compile … --universal --generate-hashes`).
 
 Données utilisateur : `%APPDATA%\QuakePad\settings.json` et `session.json`.
 
@@ -127,4 +146,4 @@ Données utilisateur : `%APPDATA%\QuakePad\settings.json` et `session.json`.
 Générées par `tools/make_icons.py` (Pillow) pour les deux outils.
 
 ## Build automatique
-Le workflow `.github/workflows/build.yml` construit `QuakePad.exe` et le zip de l'extension à chaque push sur `main` (onglet **Actions** → artefacts).
+Le workflow `.github/workflows/build.yml` lance, à chaque push et pull request, l'analyse du code et les tests sous **Ubuntu et Windows** (DPAPI réel), puis — seulement s'ils réussissent — construit `QuakePad.exe` et le zip de l'extension (onglet **Actions** → artefacts). Actions épinglées par empreinte de commit, permissions en lecture seule.

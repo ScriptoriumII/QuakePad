@@ -1,4 +1,5 @@
 """Onglet d'édition : texte enrichi (gras, tailles, tableaux, images) ou texte brut."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -6,8 +7,20 @@ from pathlib import Path
 
 from PySide6.QtCore import QBuffer, QByteArray, QMimeData, Qt, QUrl, Signal
 from PySide6.QtGui import (
-    QBrush, QColor, QFont, QFontMetricsF, QImage, QTextCharFormat, QTextCursor, QTextDocument,
-    QTextBlockFormat, QTextFrameFormat, QTextImageFormat, QTextLength, QTextListFormat, QTextTableFormat,
+    QBrush,
+    QColor,
+    QFont,
+    QFontMetricsF,
+    QImage,
+    QTextBlockFormat,
+    QTextCharFormat,
+    QTextCursor,
+    QTextDocument,
+    QTextFrameFormat,
+    QTextImageFormat,
+    QTextLength,
+    QTextListFormat,
+    QTextTableFormat,
 )
 from PySide6.QtWidgets import QMenu, QTextEdit
 
@@ -16,7 +29,7 @@ from .textio import read_text, write_text
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".ico"}
 RICH_EXTS = {".html", ".htm"}
 MD_EXTS = {".md", ".markdown"}
-MAX_IMAGE_PX = 1600   # résolution stockée maximale
+MAX_IMAGE_PX = 1600  # résolution stockée maximale
 DISPLAY_IMAGE_PX = 640  # largeur affichée par défaut
 
 
@@ -315,10 +328,16 @@ class Document(QTextEdit):
 
     def insertFromMimeData(self, source: QMimeData) -> None:  # noqa: N802
         if source.hasUrls():
-            images = [u.toLocalFile() for u in source.urls()
-                      if u.isLocalFile() and Path(u.toLocalFile()).suffix.lower() in IMAGE_EXTS]
-            others = [u.toLocalFile() for u in source.urls()
-                      if u.isLocalFile() and Path(u.toLocalFile()).suffix.lower() not in IMAGE_EXTS]
+            images = [
+                u.toLocalFile()
+                for u in source.urls()
+                if u.isLocalFile() and Path(u.toLocalFile()).suffix.lower() in IMAGE_EXTS
+            ]
+            others = [
+                u.toLocalFile()
+                for u in source.urls()
+                if u.isLocalFile() and Path(u.toLocalFile()).suffix.lower() not in IMAGE_EXTS
+            ]
             for p in images:
                 self.insert_image_file(p)
             if others:
@@ -445,8 +464,10 @@ class Document(QTextEdit):
         if not self.issues:
             return False
         pos = self.textCursor().selectionEnd()
-        it = next((i for i in sorted(self.issues, key=lambda x: x.start) if i.start >= pos),
-                  min(self.issues, key=lambda x: x.start))
+        it = next(
+            (i for i in sorted(self.issues, key=lambda x: x.start) if i.start >= pos),
+            min(self.issues, key=lambda x: x.start),
+        )
         c = QTextCursor(self.document())
         c.setPosition(it.start)
         c.setPosition(it.end, QTextCursor.MoveMode.KeepAnchor)
@@ -479,7 +500,7 @@ class Document(QTextEdit):
         img_cursor = self._image_cursor_at(e.pos())
         if img_cursor:
             sub = QMenu("Taille de l'image", menu)
-            for label, ratio in (("25 %", .25), ("50 %", .5), ("75 %", .75), ("100 % (originale)", 1.0)):
+            for label, ratio in (("25 %", 0.25), ("50 %", 0.5), ("75 %", 0.75), ("100 % (originale)", 1.0)):
                 a = sub.addAction(label)
                 a.triggered.connect(lambda _=False, r=ratio, c=img_cursor: self.resize_image(c, r))
             menu.insertMenu(first, sub)
@@ -487,13 +508,17 @@ class Document(QTextEdit):
 
         if self.textCursor().currentTable() is not None:
             sub = QMenu("Tableau", menu)
-            for label, op in (("Insérer une ligne au-dessus", "row_above"), ("Insérer une ligne en dessous", "row_below"),
-                              ("Insérer une colonne à gauche", "col_left"), ("Insérer une colonne à droite", "col_right"),
-                              ("Supprimer la ligne", "del_row"), ("Supprimer la colonne", "del_col")):
+            for label, op in (
+                ("Insérer une ligne au-dessus", "row_above"),
+                ("Insérer une ligne en dessous", "row_below"),
+                ("Insérer une colonne à gauche", "col_left"),
+                ("Insérer une colonne à droite", "col_right"),
+                ("Supprimer la ligne", "del_row"),
+                ("Supprimer la colonne", "del_col"),
+            ):
                 a = sub.addAction(label)
                 a.triggered.connect(lambda _=False, o=op: self.table_op(o))
             menu.addSeparator()
             menu.addMenu(sub)
         menu.exec(e.globalPos())
         menu.deleteLater()
-

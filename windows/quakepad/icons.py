@@ -2,6 +2,7 @@
 
 Deux familles : tracés SVG « ligne » (24×24) et lettres typographiques (B, I, U, S, A).
 """
+
 from __future__ import annotations
 
 from PySide6.QtCore import QByteArray, QRectF, Qt
@@ -10,19 +11,19 @@ from PySide6.QtSvg import QSvgRenderer
 
 _PATHS = {
     "list_bullet": '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.3"/>'
-                   '<circle cx="4.5" cy="12" r="1.3"/><circle cx="4.5" cy="18" r="1.3"/>',
+    '<circle cx="4.5" cy="12" r="1.3"/><circle cx="4.5" cy="18" r="1.3"/>',
     "list_number": '<path d="M10 6h10M10 12h10M10 18h10"/>'
-                   '<path d="M4 4.5l1.6-.9V9" stroke-width="1.6"/><path d="M3.6 14c.4-.9 2.6-1 2.6.4 0 1.1-2.6 1.9-2.6 3.3h2.8" stroke-width="1.6"/>',
+    '<path d="M4 4.5l1.6-.9V9" stroke-width="1.6"/><path d="M3.6 14c.4-.9 2.6-1 2.6.4 0 1.1-2.6 1.9-2.6 3.3h2.8" stroke-width="1.6"/>',
     "table": '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M3 9.5h18M3 14.5h18M9 4.5v15M15 4.5v15"/>',
     "image": '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><circle cx="8.5" cy="9.5" r="1.7"/>'
-             '<path d="M21 15.5l-4.5-4.5L7 19.5"/>',
+    '<path d="M21 15.5l-4.5-4.5L7 19.5"/>',
     "clear": '<path d="M5 6h11M10.5 6l-3 13"/><path d="M14 14l6 6M20 14l-6 6"/>',
     "spell": '<path d="M3 16l4-11 4 11M4.6 12.2h4.8"/><path d="M12.5 15.5l3 3 6-7"/>',
     "ai": '<path d="M11 3.5l1.7 4.6 4.6 1.7-4.6 1.7L11 16.1l-1.7-4.6-4.6-1.7 4.6-1.7z"/>'
-          '<path d="M18.5 14.5l.9 2.3 2.3.9-2.3.9-.9 2.3-.9-2.3-2.3-.9 2.3-.9z"/>',
+    '<path d="M18.5 14.5l.9 2.3 2.3.9-2.3.9-.9 2.3-.9-2.3-2.3-.9 2.3-.9z"/>',
     "next_error": '<path d="M4 12h13M13 7l5 5-5 5"/><path d="M4 19.5h7" stroke-dasharray="1.6 2.2"/>',
     "pdf": '<path d="M14 3H6.5A2.5 2.5 0 0 0 4 5.5v13A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V9z"/>'
-           '<path d="M14 3v6h6"/><path d="M8 17v-4h1.5a1.3 1.3 0 0 1 0 2.6H8M13 13v4h.9a2 2 0 0 0 0-4z" stroke-width="1.4"/>',
+    '<path d="M14 3v6h6"/><path d="M8 17v-4h1.5a1.3 1.3 0 0 1 0 2.6H8M13 13v4h.9a2 2 0 0 0 0-4z" stroke-width="1.4"/>',
     "plus": '<path d="M12 5v14M5 12h14"/>',
     "close": '<path d="M7 7l10 10M17 7L7 17"/>',
     "pin": '<path d="M9 3.5h6l-.8 6.3 3.3 3.2h-11l3.3-3.2z"/><path d="M12 13v7.5"/>',

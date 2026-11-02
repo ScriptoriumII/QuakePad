@@ -3,6 +3,7 @@
 Le texte est envoyé paragraphe par paragraphe ; la réponse corrigée est réappliquée caractère par
 caractère (diff), ce qui préserve la mise en forme, les images et les tableaux.
 """
+
 from __future__ import annotations
 
 import difflib
@@ -15,6 +16,9 @@ import urllib.request
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QTextCursor
 
+from . import netsec
+from .log import log
+
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 DEFAULT_ANTHROPIC_MODEL = "claude-haiku-5-5"
@@ -26,44 +30,60 @@ DEFAULT_OPENAI_MODEL = "mistral-nemo"
 #   base None = adresse saisie par l'utilisateur (fournisseur « Autre »).
 PROVIDERS = {
     "gemini": {
-        "label": "Google Gemini — gratuit", "kind": "openai",
+        "label": "Google Gemini — gratuit",
+        "kind": "openai",
         "base": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "model": "gemini-3.8-flash", "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite"],
-        "key_url": "https://aistudio.google.com/api-keys", "key_hint": "AIza…",
+        "model": "gemini-3.8-flash",
+        "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite"],
+        "key_url": "https://aistudio.google.com/api-keys",
+        "key_hint": "AIza…",
         "quota_url": "https://ai.google.dev/gemini-api/docs/rate-limits",
         "extra": {"reasoning_effort": "low"},  # la correction ne demande pas de réflexion poussée
         "note": "Gratuit, sans carte bancaire. En offre gratuite, Google peut utiliser les textes pour "
-                "améliorer ses produits (relecture humaine possible) : réservez-le aux notes non sensibles.",
+        "améliorer ses produits (relecture humaine possible) : réservez-le aux notes non sensibles.",
     },
     "mistral": {
-        "label": "Mistral — gratuit (français, UE)", "kind": "openai",
+        "label": "Mistral — gratuit (français, UE)",
+        "kind": "openai",
         "base": "https://api.mistral.ai/v1",
-        "model": "mistral-small-latest", "models": ["mistral-small-latest", "mistral-medium-latest", "mistral-large-latest"],
-        "key_url": "https://console.mistral.ai/api-keys", "key_hint": "clé Mistral",
+        "model": "mistral-small-latest",
+        "models": ["mistral-small-latest", "mistral-medium-latest", "mistral-large-latest"],
+        "key_url": "https://console.mistral.ai/api-keys",
+        "key_hint": "clé Mistral",
         "quota_url": "https://console.mistral.ai/limits",
         "note": "Mode gratuit sans carte bancaire, excellente qualité en français. En gratuit, les textes "
-                "peuvent servir à améliorer les modèles : vérifiez l'option dans votre console Mistral.",
+        "peuvent servir à améliorer les modèles : vérifiez l'option dans votre console Mistral.",
     },
     "anthropic": {
-        "label": "Claude — Anthropic (payant à l'usage)", "kind": "anthropic",
-        "model": DEFAULT_ANTHROPIC_MODEL, "models": ["claude-haiku-5-5", "claude-sonnet-5-5"],
-        "key_url": "https://platform.claude.com/settings/keys", "key_hint": "sk-ant-…",
+        "label": "Claude — Anthropic (payant à l'usage)",
+        "kind": "anthropic",
+        "model": DEFAULT_ANTHROPIC_MODEL,
+        "models": ["claude-haiku-5-5", "claude-sonnet-5-5"],
+        "key_url": "https://platform.claude.com/settings/keys",
+        "key_hint": "sk-ant-…",
         "note": "Clé à créer sur Claude Platform (facturation séparée de l'abonnement Claude). "
-                "claude-haiku-5-5 : rapide et économique ; claude-sonnet-5-5 : plus précis.",
+        "claude-haiku-5-5 : rapide et économique ; claude-sonnet-5-5 : plus précis.",
     },
     "ollama": {
-        "label": "Ollama — IA locale gratuite", "kind": "openai",
+        "label": "Ollama — IA locale gratuite",
+        "kind": "openai",
         "base": "http://localhost:11434/v1",
-        "model": "mistral-nemo", "models": ["mistral-nemo", "mistral-small3.2", "gemma3:12b", "qwen3:8b"],
-        "key_url": "https://ollama.com/download", "key_hint": "(aucune clé)",
+        "model": "mistral-nemo",
+        "models": ["mistral-nemo", "mistral-small3.2", "gemma3:12b", "qwen3:8b"],
+        "key_url": "https://ollama.com/download",
+        "key_hint": "(aucune clé)",
         "note": "100 % local, rien ne quitte le PC. Installez Ollama puis « ollama pull mistral-nemo ».",
     },
     "openai": {
-        "label": "Autre service compatible OpenAI…", "kind": "openai", "base": None,
-        "model": DEFAULT_OPENAI_MODEL, "models": [],
-        "key_url": "", "key_hint": "clé du service",
+        "label": "Autre service compatible OpenAI…",
+        "kind": "openai",
+        "base": None,
+        "model": DEFAULT_OPENAI_MODEL,
+        "models": [],
+        "key_url": "",
+        "key_hint": "clé du service",
         "note": "Groq, OpenRouter, LM Studio, OpenAI… : indiquez l'adresse de l'API (se termine souvent par /v1), "
-                "pas celle de la page web du service.",
+        "pas celle de la page web du service.",
     },
 }
 
@@ -85,6 +105,8 @@ def resolve(cfg: dict) -> dict:
         model = models.get(pid) or meta["model"]
     base = meta.get("base") or (cfg.get("openai_base") or DEFAULT_OPENAI_BASE)
     return {"id": pid, "kind": meta["kind"], "base": base.rstrip("/"), "key": key, "model": model, "meta": meta}
+
+
 OBJ = "￼"  # caractère d'une image dans le document Qt
 BATCH_CHARS = 12000
 BATCH_PARAS = 80
@@ -153,10 +175,13 @@ def _post_json(url: str, payload: dict, headers: dict, timeout: int = 120, retri
 
 def _post_json_once(url: str, payload: dict, headers: dict, timeout: int) -> dict:
     import socket
-    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
-                                 headers={"content-type": "application/json", **headers})
+
+    req = urllib.request.Request(
+        url, data=json.dumps(payload).encode("utf-8"), headers={"content-type": "application/json", **headers}
+    )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        secret = any(k.lower() in ("authorization", "x-api-key") for k in headers)
+        with netsec.open_url(req, timeout, sends_secret=secret) as resp:
             raw = resp.read().decode("utf-8", "replace")
             resp_headers = dict(resp.headers.items())
         try:
@@ -167,9 +192,13 @@ def _post_json_once(url: str, payload: dict, headers: dict, timeout: int) -> dic
         except ValueError:
             hint = ""
             if "aistudio.google.com" in url or "console." in url or raw.lstrip().startswith("<"):
-                hint = (" L'adresse semble être celle d'une page web (page des clés, console…) et non celle "
-                        "de l'API. Choisissez le fournisseur dédié dans la liste, ou corrigez l'adresse.")
+                hint = (
+                    " L'adresse semble être celle d'une page web (page des clés, console…) et non celle "
+                    "de l'API. Choisissez le fournisseur dédié dans la liste, ou corrigez l'adresse."
+                )
             raise AIError("Le serveur n'a pas renvoyé de réponse d'API (JSON)." + hint) from None
+    except netsec.UnsafeURLError as exc:
+        raise AIError(str(exc)) from exc
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", "replace")
         detail = _error_message(raw)
@@ -177,23 +206,33 @@ def _post_json_once(url: str, payload: dict, headers: dict, timeout: int) -> dic
         if code in (401, 403):
             raise AIError("Clé API refusée (401/403). Vérifiez-la dans Paramètres → Correction.", code) from exc
         if code == 429:
-            raise AIError("Quota gratuit ou limite de requêtes atteint (429). Patientez une minute, "
-                          "ou essayez un autre modèle.", code) from exc
+            raise AIError(
+                "Quota gratuit ou limite de requêtes atteint (429). Patientez une minute, ou essayez un autre modèle.",
+                code,
+            ) from exc
         if code in (500, 502, 503, 504):
-            raise AIError(f"Le service IA est momentanément surchargé ou indisponible ({code}) : « {detail} »", code) from exc
+            raise AIError(
+                f"Le service IA est momentanément surchargé ou indisponible ({code}) : « {detail} »", code
+            ) from exc
         if code == 404:
             raise AIError(f"Modèle ou adresse introuvable (404) : vérifiez le nom du modèle. {detail}", code) from exc
         if code == 400 and "API key" in raw:
-            raise AIError("Clé API invalide pour ce fournisseur. Vérifiez-la dans Paramètres → Correction.", code) from exc
+            raise AIError(
+                "Clé API invalide pour ce fournisseur. Vérifiez-la dans Paramètres → Correction.", code
+            ) from exc
         raise AIError(f"Erreur HTTP {code} : {detail}", code) from exc
     except urllib.error.URLError as exc:
         if isinstance(exc.reason, (TimeoutError, socket.timeout)):
-            raise AIError(f"Le service IA n'a pas répondu en {timeout} s. Réessayez, ou choisissez un modèle plus "
-                          "rapide (ex. « flash-lite »).") from exc
+            raise AIError(
+                f"Le service IA n'a pas répondu en {timeout} s. Réessayez, ou choisissez un modèle plus "
+                "rapide (ex. « flash-lite »)."
+            ) from exc
         raise AIError(f"Serveur injoignable : {exc.reason}") from exc
-    except (TimeoutError, socket.timeout) as exc:
-        raise AIError(f"Le service IA n'a pas répondu en {timeout} s. Réessayez, ou choisissez un modèle plus "
-                      "rapide (ex. « flash-lite »).") from exc
+    except TimeoutError as exc:
+        raise AIError(
+            f"Le service IA n'a pas répondu en {timeout} s. Réessayez, ou choisissez un modèle plus "
+            "rapide (ex. « flash-lite »)."
+        ) from exc
 
 
 def _call(cfg: dict, user_text: str, timeout: int | None = None) -> str:
@@ -217,10 +256,12 @@ def _call(cfg: dict, user_text: str, timeout: int | None = None) -> str:
             from . import usage
 
             usage.mark_exhausted(ep["id"])
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception:  # noqa: BLE001 — le suivi ne doit jamais bloquer la correction
+            log.warning("Suivi de consommation : mark_exhausted impossible", exc_info=True)
     tried = ", ".join(candidates[:3])
-    raise AIError(f"{last} — modèles essayés : {tried}. Réessayez dans quelques minutes.", last.status if last else None)
+    raise AIError(
+        f"{last} — modèles essayés : {tried}. Réessayez dans quelques minutes.", last.status if last else None
+    )
 
 
 def _record(provider: str, model: str, tokens: int, data: dict) -> None:
@@ -229,7 +270,7 @@ def _record(provider: str, model: str, tokens: int, data: dict) -> None:
 
         usage.record(provider, model, tokens, data.get("_headers") if isinstance(data, dict) else None)
     except Exception:  # noqa: BLE001 — le suivi ne doit jamais faire échouer une correction
-        pass
+        log.warning("Suivi de consommation : enregistrement impossible", exc_info=True)
 
 
 def _call_model(cfg: dict, user_text: str, timeout: int | None, model: str) -> str:
@@ -238,44 +279,59 @@ def _call_model(cfg: dict, user_text: str, timeout: int | None, model: str) -> s
     if timeout is None:
         timeout = 300 if ep["id"] == "ollama" else 120
     if ep["kind"] == "anthropic":
-        if not ep["key"]:
-            raise AIError("Aucune clé API Anthropic configurée (Paramètres → Correction).")
-        data = _post_json(ANTHROPIC_URL, {
-            "model": ep["model"],
-            "max_tokens": 16000,
-            "system": SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": user_text}],
-        }, {"x-api-key": ep["key"], "anthropic-version": ANTHROPIC_VERSION}, timeout=timeout)
-        if data.get("stop_reason") == "max_tokens":
-            raise AIError("Réponse tronquée : sélectionnez une partie plus courte du texte.")
-        u = data.get("usage") or {}
-        _record(ep["id"], model, int(u.get("input_tokens", 0)) + int(u.get("output_tokens", 0)), data)
-        return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
-    # API compatible OpenAI (Gemini, Mistral, Ollama, Groq, OpenRouter, LM Studio…)
+        return _call_anthropic(ep, user_text, timeout)
+    return _call_openai_compatible(ep, user_text, timeout)
+
+
+def _call_anthropic(ep: dict, user_text: str, timeout: int) -> str:
+    """API Messages d'Anthropic."""
+    if not ep["key"]:
+        raise AIError("Aucune clé API Anthropic configurée (Paramètres → Correction).")
+    payload = {
+        "model": ep["model"],
+        "max_tokens": 16000,
+        "system": SYSTEM_PROMPT,
+        "messages": [{"role": "user", "content": user_text}],
+    }
+    headers = {"x-api-key": ep["key"], "anthropic-version": ANTHROPIC_VERSION}
+    data = _post_json(ANTHROPIC_URL, payload, headers, timeout=timeout)
+    if data.get("stop_reason") == "max_tokens":
+        raise AIError("Réponse tronquée : sélectionnez une partie plus courte du texte.")
+    u = data.get("usage") or {}
+    _record(ep["id"], ep["model"], int(u.get("input_tokens", 0)) + int(u.get("output_tokens", 0)), data)
+    return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+
+
+def _call_openai_compatible(ep: dict, user_text: str, timeout: int) -> str:
+    """/chat/completions : Gemini, Mistral, Ollama, Groq, OpenRouter, LM Studio…"""
     if not ep["key"] and ep["id"] not in ("ollama", "openai"):
-        raise AIError(f"Aucune clé API configurée pour {ep['meta']['label'].split(' —')[0]} "
-                      "(Paramètres → Correction).")
+        raise AIError(f"Aucune clé API configurée pour {ep['meta']['label'].split(' —')[0]} (Paramètres → Correction).")
     headers = {"authorization": f"Bearer {ep['key']}"} if ep["key"] else {}
     payload = {
         "model": ep["model"],
         "temperature": 0,
-        "messages": [{"role": "system", "content": SYSTEM_PROMPT},
-                     {"role": "user", "content": user_text}],
+        "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user_text}],
         **ep["meta"].get("extra", {}),
     }
-    data = _post_json(f"{ep['base']}/chat/completions", payload, headers, timeout=timeout)
-    if isinstance(data, list) and data and isinstance(data[0], dict) and "error" in data[0]:
-        data = data[0]  # certaines API renvoient l'erreur dans une liste
-    if isinstance(data, dict) and data.get("error"):
-        err = data["error"]
-        raise AIError(f"Erreur du service IA : {err.get('message', err) if isinstance(err, dict) else err}")
+    data = _raise_api_error(_post_json(f"{ep['base']}/chat/completions", payload, headers, timeout=timeout))
     try:
         text = data["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError, TypeError) as exc:
         raise AIError("Réponse inattendue du serveur IA.") from exc
     u = data.get("usage") or {}
-    _record(ep["id"], model, int(u.get("total_tokens") or (u.get("prompt_tokens", 0) + u.get("completion_tokens", 0))), data)
+    total = u.get("total_tokens") or (u.get("prompt_tokens", 0) + u.get("completion_tokens", 0))
+    _record(ep["id"], ep["model"], int(total), data)
     return text
+
+
+def _raise_api_error(data):
+    """Certaines API renvoient une erreur dans un corps 200 (parfois sous forme de liste)."""
+    if isinstance(data, list) and data and isinstance(data[0], dict) and "error" in data[0]:
+        data = data[0]
+    if isinstance(data, dict) and data.get("error"):
+        err = data["error"]
+        raise AIError(f"Erreur du service IA : {err.get('message', err) if isinstance(err, dict) else err}")
+    return data
 
 
 def _parse_array(text: str, expected: int) -> list[str]:
@@ -285,7 +341,7 @@ def _parse_array(text: str, expected: int) -> list[str]:
     if start < 0 or end < start:
         raise AIError("L'IA n'a pas renvoyé de tableau JSON.")
     try:
-        arr = json.loads(text[start:end + 1])
+        arr = json.loads(text[start : end + 1])
     except ValueError as exc:
         raise AIError("Réponse JSON de l'IA illisible.") from exc
     if not isinstance(arr, list) or len(arr) != expected or not all(isinstance(x, str) for x in arr):
@@ -364,7 +420,7 @@ def apply_corrections(doc_widget, blocks: list[tuple[int, str]], corrected: list
     touched = []  # (bloc, [(début, fin) dans le nouveau texte])
     master = QTextCursor(document)
     master.beginEditBlock()  # un seul Ctrl+Z pour toute la correction
-    for (number, old), new in sorted(zip(blocks, corrected), key=lambda x: -x[0][0]):
+    for (number, old), new in sorted(zip(blocks, corrected, strict=True), key=lambda x: -x[0][0]):
         block = document.findBlockByNumber(number)
         if not block.isValid() or block.text() != old or not _acceptable(old, new):
             continue
@@ -398,8 +454,10 @@ class AICorrector(QObject):
             try:
                 self.finished.emit(doc, blocks, correct_paragraphs([t for _, t in blocks], cfg))
             except AIError as exc:
+                log.warning("Correction IA (%s) en échec : %s", cfg.get("ai_provider"), exc)
                 self.failed.emit(doc, str(exc))
             except Exception as exc:  # noqa: BLE001 — remonté à l'utilisateur
+                log.exception("Correction IA : erreur inattendue")
                 self.failed.emit(doc, f"{type(exc).__name__} : {exc}")
 
         threading.Thread(target=run, daemon=True).start()

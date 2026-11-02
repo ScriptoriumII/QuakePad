@@ -1,4 +1,5 @@
 """Paramètres persistants de QuakePad (stockés dans %APPDATA%\\QuakePad)."""
+
 from __future__ import annotations
 
 import copy
@@ -7,8 +8,9 @@ import os
 from pathlib import Path
 
 APP_NAME = "QuakePad"
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.0"
 SECRET_KEYS = ("anthropic_key", "openai_key")
+MERGED_DICTS = ("hotkey", "shortcuts", "ai_keys", "ai_models", "ai_quotas")
 
 # Scan code 0x29 = touche située sous Échap (« ² » en AZERTY, « ` » en QWERTY),
 # la même que celle utilisée par le mode Quake de Windows Terminal.
@@ -75,45 +77,56 @@ class Settings(dict):
     path: Path
 
     @classmethod
-    def load(cls) -> "Settings":
+    def load(cls) -> Settings:
         s = cls(copy.deepcopy(DEFAULTS))
         s.path = app_dir() / "settings.json"
         try:
             data = json.loads(s.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             data = None
-        if isinstance(data, dict):
-            # Migration depuis la 1.0 (height_pct / width_pct, thème sans « système »)
-            if "sizes" not in data and "height_pct" in data:
-                s["sizes"]["top"] = {"depth": data.get("height_pct", 45), "span": data.get("width_pct", 100)}
-            for key, value in data.items():
-                if key in ("hotkey", "shortcuts", "ai_keys", "ai_models", "ai_quotas") and isinstance(value, dict):
-                    s[key].update(value)
-                elif key == "sizes" and isinstance(value, dict):
-                    for edge, size in value.items():
-                        if edge in s["sizes"] and isinstance(size, dict):
-                            s["sizes"][edge].update(size)
-                elif key in DEFAULTS:
-                    s[key] = value
-        if isinstance(data, dict) and data.get("opacity") == 97:  # ancienne valeur par défaut (transparence gênante)
-            s["opacity"] = 100
-        from .winapi import unprotect
-        for k in SECRET_KEYS:
-            s[k] = unprotect(s.get(k, ""))
-        s["ai_keys"] = {pid: unprotect(v) for pid, v in s["ai_keys"].items()}
-        # Migration : une clé Google (AIza…) saisie dans « compatible OpenAI » passe sur Gemini.
-        if s["openai_key"].startswith("AIza") and not s["ai_keys"].get("gemini"):
-            s["ai_keys"]["gemini"] = s["openai_key"]
-            s["openai_key"] = ""
-            s["openai_base"] = DEFAULTS["openai_base"]
-            s["openai_model"] = DEFAULTS["openai_model"]
-            s["ai_provider"] = "gemini"
-        if isinstance(data, dict) and "ai_keys" not in data and data.get("ai_provider") == "anthropic" \
-                and not s["anthropic_key"]:
-            s["ai_provider"] = "gemini"  # jamais configuré : proposer d'abord l'option gratuite
-        if s["edge"] not in EDGES:
-            s["edge"] = "top"
+        if not isinstance(data, dict):
+            data = {}
+        s._merge(data)
+        s._decrypt_secrets()
+        s._migrate(data)
         return s
+
+    def _merge(self, data: dict) -> None:
+        """Fusionne le fichier avec les valeurs par défaut (clés inconnues ignorées)."""
+        for key, value in data.items():
+            if key in MERGED_DICTS and isinstance(value, dict):
+                self[key].update(value)
+            elif key == "sizes" and isinstance(value, dict):
+                for edge, size in value.items():
+                    if edge in self["sizes"] and isinstance(size, dict):
+                        self["sizes"][edge].update(size)
+            elif key in DEFAULTS:
+                self[key] = value
+
+    def _decrypt_secrets(self) -> None:
+        from .winapi import unprotect
+
+        for k in SECRET_KEYS:
+            self[k] = unprotect(self.get(k, ""))
+        self["ai_keys"] = {pid: unprotect(v) for pid, v in self["ai_keys"].items()}
+
+    def _migrate(self, data: dict) -> None:
+        """Migrations des anciennes versions."""
+        if "sizes" not in data and "height_pct" in data:  # 1.0 : height_pct / width_pct
+            self["sizes"]["top"] = {"depth": data.get("height_pct", 45), "span": data.get("width_pct", 100)}
+        if data.get("opacity") == 97:  # 1.0 : ancienne valeur par défaut (transparence gênante)
+            self["opacity"] = 100
+        if self["openai_key"].startswith("AIza") and not self["ai_keys"].get("gemini"):
+            # 1.3 : clé Google saisie dans « compatible OpenAI » -> fournisseur Gemini
+            self["ai_keys"]["gemini"] = self["openai_key"]
+            self["openai_key"] = ""
+            self["openai_base"] = DEFAULTS["openai_base"]
+            self["openai_model"] = DEFAULTS["openai_model"]
+            self["ai_provider"] = "gemini"
+        if "ai_keys" not in data and data.get("ai_provider") == "anthropic" and not self["anthropic_key"]:
+            self["ai_provider"] = "gemini"  # IA jamais configurée : proposer d'abord l'option gratuite
+        if self["edge"] not in EDGES:
+            self["edge"] = "top"
 
     def size(self, edge: str | None = None) -> dict:
         return self["sizes"][edge or self["edge"]]

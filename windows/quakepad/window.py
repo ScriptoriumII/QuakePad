@@ -1,160 +1,68 @@
 """Fenêtre principale : bloc-notes à onglets qui glisse depuis un bord de l'écran (mode Quake)."""
+
 from __future__ import annotations
 
-import json
-from datetime import datetime
-from pathlib import Path
-
-from PySide6.QtCore import Signal, QEvent, QObject, QEasingCurve, QMarginsF, QPropertyAnimation, QRect, QSize, Qt, QTimer
+from PySide6.QtCore import QPropertyAnimation, QSize, Qt, QTimer
 from PySide6.QtGui import (
-    QAction, QColor, QCursor, QFont, QGuiApplication, QIcon, QKeySequence, QPageLayout,
-    QPageSize, QPainter, QTextListFormat,
+    QAction,
+    QFont,
+    QGuiApplication,
+    QIcon,
+    QKeySequence,
+    QTextListFormat,
 )
 from PySide6.QtWidgets import (
-    QApplication, QColorDialog, QDialog, QFileDialog, QGridLayout, QHBoxLayout, QInputDialog,
-    QLabel, QLayout, QLineEdit, QMenu, QMessageBox, QProgressBar, QSizePolicy, QSystemTrayIcon, QTabBar, QTabWidget, QTextEdit,
-    QToolBar, QToolButton, QVBoxLayout, QWidget,
+    QApplication,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLayout,
+    QMenu,
+    QMessageBox,
+    QSizePolicy,
+    QSystemTrayIcon,
+    QTabBar,
+    QTabWidget,
+    QTextEdit,
+    QToolBar,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 from . import winapi
-from .dialogs import SettingsDialog, TableDialog
-from .editor import IMAGE_EXTS, Document, format_for_path
+from .ai import AICorrector
+from .correction import CorrectionMixin
+from .dialogs import SettingsDialog
+from .editor import Document
+from .files import FilesMixin
 from .findbar import FindBar
+from .formatting import FormattingMixin
 from .icons import icon
+from .quake import QuakeMixin
+from .session import SessionMixin
 from .settings import APP_NAME, APP_VERSION, Settings, app_dir
-from .ai import AICorrector, apply_corrections, collect_blocks
-from .ai import resolve as resolve_ai
-from .spell import SpellChecker, document_text
+from .spell import SpellChecker
+from .tabs import TabsMixin
 from .textio import ENCODINGS, EOLS
 from .theme import palette, qpalette, stylesheet
+from .widgets import DialogWatcher, EdgeHandle, UsageIndicator
 
-OPEN_FILTER = ("Textes et notes (*.txt *.md *.html *.htm *.log *.ini *.cfg *.conf *.json *.yaml *.yml "
-               "*.ps1 *.py *.sh *.csv *.xml);;Tous les fichiers (*)")
-SAVE_FILTERS = {
-    "txt": "Texte brut (*.txt)",
-    "html": "Document enrichi avec images (*.html)",
-    "md": "Markdown (*.md)",
-}
-IMAGE_FILTER = "Images (" + " ".join(f"*{e}" for e in sorted(IMAGE_EXTS)) + ")"
-OPPOSITE = {"top": "bottom", "bottom": "top", "left": "right", "right": "left"}
 FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72]
 
 
-class EdgeHandle(QWidget):
-    """Bord redimensionnable. role = "depth" (bord intérieur) ou "span" (bords latéraux)."""
-
-    def __init__(self, window: "QuakeWindow", side: str):
-        super().__init__(window)
-        self.side = side
-        self.role = "span"
-        self._win = window
-        self._start = None
-        horizontal = side in ("top", "bottom")
-        if horizontal:
-            self.setFixedHeight(6)
-        else:
-            self.setFixedWidth(6)
-        self.setCursor(Qt.CursorShape.SizeVerCursor if horizontal else Qt.CursorShape.SizeHorCursor)
-        self.setMouseTracking(True)
-
-    def paintEvent(self, _e):  # noqa: N802
-        p = QPainter(self)
-        pal = palette(self._win.settings["theme"])
-        p.fillRect(self.rect(), QColor(pal["raised"] if self.underMouse() else pal["surface"]))
-        if self.role == "depth":  # liseré d'accent côté contenu, comme Windows Terminal
-            r = self.rect()
-            accent = QColor(pal["accent"])
-            if self.side == "bottom":
-                p.fillRect(0, 0, r.width(), 2, accent)
-            elif self.side == "top":
-                p.fillRect(0, r.height() - 2, r.width(), 2, accent)
-            elif self.side == "right":
-                p.fillRect(0, 0, 2, r.height(), accent)
-            else:
-                p.fillRect(r.width() - 2, 0, 2, r.height(), accent)
-
-    def enterEvent(self, e):  # noqa: N802
-        self.update()
-
-    def leaveEvent(self, e):  # noqa: N802
-        self.update()
-
-    def mousePressEvent(self, e):  # noqa: N802
-        if e.button() == Qt.MouseButton.LeftButton:
-            self._start = e.globalPosition()
-            self._win.begin_resize()
-
-    def mouseMoveEvent(self, e):  # noqa: N802
-        if self._start is None:
-            return
-        d = e.globalPosition() - self._start
-        delta = d.y() if self.side in ("top", "bottom") else d.x()
-        sign = 1 if self.side in ("bottom", "right") else -1
-        self._win.drag_resize(self.role, sign * delta)
-
-    def mouseReleaseEvent(self, e):  # noqa: N802
-        if self._start is not None:
-            self._start = None
-            self._win.end_resize()
-
-
-class _DialogWatcher(QObject):
-    """Place chaque boîte de dialogue au-dessus de QuakePad (fenêtre « toujours au premier plan »)."""
-
-    def __init__(self, window: "QuakeWindow"):
-        super().__init__(window)
-        self._win = window
-
-    def eventFilter(self, obj, ev):  # noqa: N802
-        if isinstance(obj, QDialog) and obj.isWindow():
-            t = ev.type()
-            if t == QEvent.Type.Show:
-                self._win.dialog_opened(obj)
-            elif t in (QEvent.Type.Hide, QEvent.Type.Close):
-                QTimer.singleShot(0, self._win.dialog_closed)
-        return False
-
-
-class UsageIndicator(QWidget):
-    """Consommation IA du jour : « ✦ Gemini ▮▮▯ 12 % utilisé · 88 % libre » (clic = Paramètres)."""
-
-    clicked = Signal()
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("UsageIndicator")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(8, 0, 8, 0)
-        lay.setSpacing(6)
-        self.label = QLabel()
-        self.bar = QProgressBar()
-        self.bar.setObjectName("UsageBar")
-        self.bar.setRange(0, 1000)
-        self.bar.setTextVisible(False)
-        self.bar.setFixedSize(54, 6)
-        self.pct = QLabel()
-        self.pct.setMinimumWidth(self.pct.fontMetrics().horizontalAdvance("100 % utilisé · 100 % libre") + 4)
-        for w in (self.label, self.bar, self.pct):
-            lay.addWidget(w)
-
-    def mousePressEvent(self, e):  # noqa: N802
-        if e.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
-
-
-class QuakeWindow(QWidget):
+class QuakeWindow(QuakeMixin, TabsMixin, FilesMixin, FormattingMixin, CorrectionMixin, SessionMixin, QWidget):
     def __init__(self, settings: Settings, app_icon: QIcon):
-        super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
-                         | Qt.WindowType.Tool)
+        super().__init__(
+            None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool
+        )
         self.setObjectName("QuakeRoot")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(app_icon)
         self.settings = settings
         self.app_icon = app_icon
-        from .app import resource
-        self.assets_dir = str(Path(resource("quakepad.png")).parent)
+
         self.pinned = False
         self._anim: QPropertyAnimation | None = None
         self._hiding = False
@@ -176,7 +84,9 @@ class QuakeWindow(QWidget):
         bar.tabMoved.connect(self._keep_plus_last)
         bar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         bar.customContextMenuRequested.connect(self._tab_context_menu)
-        bar.tabBarDoubleClicked.connect(lambda i: self.rename_tab(i) if isinstance(self.tabs.widget(i), Document) else None)
+        bar.tabBarDoubleClicked.connect(
+            lambda i: self.rename_tab(i) if isinstance(self.tabs.widget(i), Document) else None
+        )
         self._rename_edit = None
         self._plus = QWidget()
         self._guard_plus = True  # pas de création automatique pendant l'initialisation
@@ -243,8 +153,16 @@ class QuakeWindow(QWidget):
         self.usage = UsageIndicator()
         self.usage.clicked.connect(lambda: self.open_settings(tab=3))
         sl.addWidget(self.lbl_path, 1)
-        for w in (self.lbl_info, self.lbl_pos, self.lbl_len, self.lbl_zoom, self.lbl_eol, self.lbl_enc,
-                  self.usage, self.lbl_hotkey):
+        for w in (
+            self.lbl_info,
+            self.lbl_pos,
+            self.lbl_len,
+            self.lbl_zoom,
+            self.lbl_eol,
+            self.lbl_enc,
+            self.usage,
+            self.lbl_hotkey,
+        ):
             sl.addWidget(w)
         self._info_timer = QTimer(self, singleShot=True, interval=8000)
         self._info_timer.timeout.connect(lambda: self.lbl_info.setText(""))
@@ -291,7 +209,7 @@ class QuakeWindow(QWidget):
         self.hotkey = winapi.GlobalHotkey(self)
         self.hotkey.activated.connect(self.toggle)
         QGuiApplication.instance().applicationStateChanged.connect(self._on_app_state)
-        self._dialog_watcher = _DialogWatcher(self)
+        self._dialog_watcher = DialogWatcher(self)
         QApplication.instance().installEventFilter(self._dialog_watcher)
         self._native_dialog_depth = 0
         try:
@@ -309,8 +227,17 @@ class QuakeWindow(QWidget):
     # ================================================================
     # Actions, raccourcis personnalisables et menus
     # ================================================================
-    def _act(self, aid: str, text: str, slot, default: str = "", checkable=False, checked=False,
-             icon_name: str | None = None, configurable: bool = True) -> QAction:
+    def _act(
+        self,
+        aid: str,
+        text: str,
+        slot,
+        default: str = "",
+        checkable=False,
+        checked=False,
+        icon_name: str | None = None,
+        configurable: bool = True,
+    ) -> QAction:
         a = QAction(text, self)
         a.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
         if checkable:
@@ -339,8 +266,10 @@ class QuakeWindow(QWidget):
 
     def shortcut_table(self) -> list[tuple[str, str, str, str]]:
         custom = self.settings.get("shortcuts", {})
-        return [(aid, label.replace("…", ""), default, custom.get(aid, default))
-                for aid, (_a, label, default) in self._actions.items()]
+        return [
+            (aid, label.replace("…", ""), default, custom.get(aid, default))
+            for aid, (_a, label, default) in self._actions.items()
+        ]
 
     def _build_actions(self) -> None:
         m = QMenu(self)
@@ -378,61 +307,98 @@ class QuakeWindow(QWidget):
         e.addAction(A("edit.findprev", "Occurrence précédente", lambda: self.find_bar.find(backward=True), "Shift+F3"))
         e.addAction(A("edit.goto", "Atteindre la ligne…", self.go_to_line, "Ctrl+G"))
         e.addSeparator()
-        e.addAction(A("edit.pasteplain", "Coller sans mise en forme", lambda: self._doc_call("paste_plain"),
-                      "Ctrl+Shift+V"))
+        e.addAction(
+            A("edit.pasteplain", "Coller sans mise en forme", lambda: self._doc_call("paste_plain"), "Ctrl+Shift+V")
+        )
         e.addAction(A("edit.date", "Insérer date/heure", self.insert_datetime, "F5"))
         e.addAction(A("edit.dupline", "Dupliquer la ligne", self.duplicate_line, "Ctrl+D"))
         e.addSeparator()
-        e.addAction(A("spell.ai", "Corriger automatiquement avec l'IA", self.ai_correct, "Ctrl+F7",
-                      icon_name="ai"))
-        e.addAction(A("spell.check", "Vérifier mot par mot (LanguageTool)", self.check_spelling, "F7",
-                      icon_name="spell"))
+        e.addAction(A("spell.ai", "Corriger automatiquement avec l'IA", self.ai_correct, "Ctrl+F7", icon_name="ai"))
+        e.addAction(
+            A("spell.check", "Vérifier mot par mot (LanguageTool)", self.check_spelling, "F7", icon_name="spell")
+        )
         e.addAction(A("spell.next", "Faute suivante", self.next_issue, "F8", icon_name="next_error"))
 
         fm = m.addMenu("Format")
         self.act_bold = A("fmt.bold", "Gras", lambda: self._doc_call("toggle_bold"), "Ctrl+B", icon_name="bold")
-        self.act_italic = A("fmt.italic", "Italique", lambda: self._doc_call("toggle_italic"), "Ctrl+I",
-                            icon_name="italic")
-        self.act_underline = A("fmt.underline", "Souligné", lambda: self._doc_call("toggle_underline"), "Ctrl+U",
-                               icon_name="underline")
-        self.act_strike = A("fmt.strike", "Barré", lambda: self._doc_call("toggle_strike"), "Ctrl+Shift+X",
-                            icon_name="strike")
+        self.act_italic = A(
+            "fmt.italic", "Italique", lambda: self._doc_call("toggle_italic"), "Ctrl+I", icon_name="italic"
+        )
+        self.act_underline = A(
+            "fmt.underline", "Souligné", lambda: self._doc_call("toggle_underline"), "Ctrl+U", icon_name="underline"
+        )
+        self.act_strike = A(
+            "fmt.strike", "Barré", lambda: self._doc_call("toggle_strike"), "Ctrl+Shift+X", icon_name="strike"
+        )
         for a in (self.act_bold, self.act_italic, self.act_underline, self.act_strike):
             a.setCheckable(True)
             fm.addAction(a)
         fm.addSeparator()
-        self.act_size_up = A("fmt.sizeup", "Agrandir le texte", lambda: self._doc_call("step_size", 1), "Ctrl+]",
-                             icon_name="size_up")
-        self.act_size_down = A("fmt.sizedown", "Réduire le texte", lambda: self._doc_call("step_size", -1),
-                               "Ctrl+[", icon_name="size_down")
+        self.act_size_up = A(
+            "fmt.sizeup", "Agrandir le texte", lambda: self._doc_call("step_size", 1), "Ctrl+]", icon_name="size_up"
+        )
+        self.act_size_down = A(
+            "fmt.sizedown", "Réduire le texte", lambda: self._doc_call("step_size", -1), "Ctrl+[", icon_name="size_down"
+        )
         self.act_color = A("fmt.color", "Couleur du texte…", self.pick_color, "", icon_name="color")
         fm.addActions([self.act_size_up, self.act_size_down, self.act_color])
         fm.addSeparator()
-        self.act_bullets = A("fmt.bullets", "Liste à puces",
-                             lambda: self._doc_call("toggle_list", QTextListFormat.Style.ListDisc), "Ctrl+Shift+L",
-                             icon_name="list_bullet")
-        self.act_numbers = A("fmt.numbers", "Liste numérotée",
-                             lambda: self._doc_call("toggle_list", QTextListFormat.Style.ListDecimal),
-                             "Ctrl+Shift+O", icon_name="list_number")
+        self.act_bullets = A(
+            "fmt.bullets",
+            "Liste à puces",
+            lambda: self._doc_call("toggle_list", QTextListFormat.Style.ListDisc),
+            "Ctrl+Shift+L",
+            icon_name="list_bullet",
+        )
+        self.act_numbers = A(
+            "fmt.numbers",
+            "Liste numérotée",
+            lambda: self._doc_call("toggle_list", QTextListFormat.Style.ListDecimal),
+            "Ctrl+Shift+O",
+            icon_name="list_number",
+        )
         fm.addActions([self.act_bullets, self.act_numbers])
         fm.addSeparator()
         self.act_table = A("insert.table", "Insérer un tableau…", self.insert_table, "Ctrl+Alt+T", icon_name="table")
-        self.act_image = A("insert.image", "Insérer une image…", self.insert_image, "Ctrl+Shift+I",
-                           icon_name="image")
-        self.act_clear = A("fmt.clear", "Effacer la mise en forme", lambda: self._doc_call("clear_formatting"),
-                           "Ctrl+Space", icon_name="clear")
+        self.act_image = A("insert.image", "Insérer une image…", self.insert_image, "Ctrl+Shift+I", icon_name="image")
+        self.act_clear = A(
+            "fmt.clear",
+            "Effacer la mise en forme",
+            lambda: self._doc_call("clear_formatting"),
+            "Ctrl+Space",
+            icon_name="clear",
+        )
         fm.addActions([self.act_table, self.act_image, self.act_clear])
 
         v = m.addMenu("Affichage")
-        self.act_toolbar = A("view.toolbar", "Barre de mise en forme", self._set_toolbar, "Ctrl+Shift+T",
-                             checkable=True, checked=self.settings["show_toolbar"])
-        self.act_wrap = A("view.wrap", "Retour automatique à la ligne", self._set_wrap, "Alt+Z",
-                          checkable=True, checked=self.settings["word_wrap"])
-        self.act_status = A("view.status", "Barre d'état", self._set_statusbar, "",
-                            checkable=True, checked=self.settings["show_statusbar"])
+        self.act_toolbar = A(
+            "view.toolbar",
+            "Barre de mise en forme",
+            self._set_toolbar,
+            "Ctrl+Shift+T",
+            checkable=True,
+            checked=self.settings["show_toolbar"],
+        )
+        self.act_wrap = A(
+            "view.wrap",
+            "Retour automatique à la ligne",
+            self._set_wrap,
+            "Alt+Z",
+            checkable=True,
+            checked=self.settings["word_wrap"],
+        )
+        self.act_status = A(
+            "view.status",
+            "Barre d'état",
+            self._set_statusbar,
+            "",
+            checkable=True,
+            checked=self.settings["show_statusbar"],
+        )
         v.addActions([self.act_toolbar, self.act_wrap, self.act_status])
         self.edge_menu = v.addMenu("Position de la fenêtre")
         from .settings import EDGES
+
         for key, label in EDGES.items():
             a = self.edge_menu.addAction(label)
             a.setData(key)
@@ -440,6 +406,7 @@ class QuakeWindow(QWidget):
             a.triggered.connect(lambda _=False, k=key: self.set_edge(k))
         self.theme_menu = v.addMenu("Thème")
         from .theme import THEMES
+
         for key, label in THEMES.items():
             a = self.theme_menu.addAction(label)
             a.setData(key)
@@ -452,6 +419,7 @@ class QuakeWindow(QWidget):
 
         m.addSeparator()
         m.addAction(A("app.settings", "Paramètres…", self.open_settings, "Ctrl+,"))
+        m.addAction(A("app.datadir", "Ouvrir le dossier des données (journal, session)", self.open_data_dir, ""))
         m.addAction(A("app.about", "À propos de QuakePad", self.about, ""))
         m.addSeparator()
         m.addAction(A("app.quit", "Quitter", self.quit_app, "Ctrl+Q"))
@@ -495,9 +463,14 @@ class QuakeWindow(QWidget):
         tmenu = QMenu(self.table_btn)
         tmenu.addAction("Insérer un tableau…", self.insert_table)
         tmenu.addSeparator()
-        for label, op in (("Ligne au-dessus", "row_above"), ("Ligne en dessous", "row_below"),
-                          ("Colonne à gauche", "col_left"), ("Colonne à droite", "col_right"),
-                          ("Supprimer la ligne", "del_row"), ("Supprimer la colonne", "del_col")):
+        for label, op in (
+            ("Ligne au-dessus", "row_above"),
+            ("Ligne en dessous", "row_below"),
+            ("Colonne à gauche", "col_left"),
+            ("Colonne à droite", "col_right"),
+            ("Supprimer la ligne", "del_row"),
+            ("Supprimer la colonne", "del_col"),
+        ):
             tmenu.addAction(label, lambda o=op: self._table_op(o))
         self.table_btn.setMenu(tmenu)
         tb.addWidget(self.table_btn)
@@ -521,11 +494,9 @@ class QuakeWindow(QWidget):
         menu.addAction("Paramètres…", lambda: (self.show_animated(), self.open_settings()))
         menu.addSeparator()
         menu.addAction("Quitter", self.quit_app)
-        self._tray_menu = menu
+        self._tray_menu = menu  # référence conservée : sans parent, Qt détruirait le menu
         self.tray.setContextMenu(menu)
-        self.tray.activated.connect(
-            lambda r: self.toggle() if r == QSystemTrayIcon.ActivationReason.Trigger else None
-        )
+        self.tray.activated.connect(lambda r: self.toggle() if r == QSystemTrayIcon.ActivationReason.Trigger else None)
         self.tray.show()
 
     # ================================================================
@@ -544,8 +515,9 @@ class QuakeWindow(QWidget):
         self.lbl_hotkey.setText(f"⌨ {s['hotkey'].get('label', '')}" if ok else "⌨ raccourci inactif")
         self.tray.setToolTip(f"{APP_NAME} — {s['hotkey'].get('label', '')}")
         if not ok and winapi.IS_WINDOWS:
-            self.tray.showMessage(APP_NAME, msg + "\nChangez-le dans Paramètres.",
-                                  QSystemTrayIcon.MessageIcon.Warning, 6000)
+            self.tray.showMessage(
+                APP_NAME, msg + "\nChangez-le dans Paramètres.", QSystemTrayIcon.MessageIcon.Warning, 6000
+            )
         if self.isVisible() and not self._hiding:
             self.setGeometry(self._target_geometry())
         self._update_status()
@@ -553,7 +525,7 @@ class QuakeWindow(QWidget):
     def apply_theme(self) -> None:
         app = QApplication.instance()
         app.setPalette(qpalette(self.settings["theme"]))
-        app.setStyleSheet(stylesheet(self.settings["theme"], self.assets_dir))
+        app.setStyleSheet(stylesheet(self.settings["theme"]))
         pal = palette(self.settings["theme"])
         accent = pal["accent"]
         self.new_tab_btn.setIcon(icon("plus", accent, 16, stroke=2.2))
@@ -580,21 +552,6 @@ class QuakeWindow(QWidget):
         self.settings.save()
         self.apply_theme()
 
-    def apply_edge_layout(self) -> None:
-        edge = self.settings["edge"]
-        inner = OPPOSITE[edge]
-        lateral = ("left", "right") if edge in ("top", "bottom") else ("top", "bottom")
-        for side, h in self.handles.items():
-            if side == inner:
-                h.role, visible = "depth", True
-            elif side in lateral:
-                h.role, visible = "span", True
-            else:
-                visible = False
-            h.setVisible(visible)
-            h.update()
-        self._position_format_bar()
-
     def _position_format_bar(self) -> None:
         """Superpose la barre de mise en forme juste sous la barre d'onglets."""
         bar = self.tabs.tabBar()
@@ -604,20 +561,15 @@ class QuakeWindow(QWidget):
         self.format_bar.raise_()
         self.new_tab_btn.setFixedSize(self.new_tab_btn.sizeHint())
         plus_w = self.new_tab_btn.sizeHint().width() + 8
-        self.tabs.setStyleSheet(f"QTabWidget::pane {{ margin-top: {h}px; border: none; }}"
-                                f"#MainTabs::tab:last {{ min-width: {plus_w}px; max-width: {plus_w}px; }}")
+        self.tabs.setStyleSheet(
+            f"QTabWidget::pane {{ margin-top: {h}px; border: none; }}"
+            f"#MainTabs::tab:last {{ min-width: {plus_w}px; max-width: {plus_w}px; }}"
+        )
 
     def resizeEvent(self, e):  # noqa: N802
         super().resizeEvent(e)
         if hasattr(self, "format_bar"):
             self._position_format_bar()
-
-    def set_edge(self, edge: str) -> None:
-        self.settings["edge"] = edge
-        self.settings.save()
-        self.apply_edge_layout()
-        if self.isVisible():
-            self.setGeometry(self._target_geometry())
 
     def _font(self) -> QFont:
         font = QFont(self.settings["font_family"])
@@ -627,14 +579,14 @@ class QuakeWindow(QWidget):
 
     def _style_doc(self, doc: Document) -> None:
         doc.apply_font(self._font())
-        doc.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth if self.settings["word_wrap"]
-                            else QTextEdit.LineWrapMode.NoWrap)
+        doc.setLineWrapMode(
+            QTextEdit.LineWrapMode.WidgetWidth if self.settings["word_wrap"] else QTextEdit.LineWrapMode.NoWrap
+        )
 
     def open_settings(self, tab: int = 0) -> None:
         self.hotkey.unregister()  # sinon la capture déclencherait le raccourci
         dlg = SettingsDialog(self.settings, self.shortcut_table(), self)
         dlg.tabs.setCurrentIndex(tab)
-        dlg.setStyleSheet(stylesheet(self.settings["theme"], self.assets_dir))
         if dlg.exec():
             vals = dlg.values()
             if vals["start_with_windows"] != self.settings["start_with_windows"]:
@@ -685,734 +637,32 @@ class QuakeWindow(QWidget):
     # ================================================================
     # Position, taille et animation
     # ================================================================
-    def _screen(self):
-        if self._screen_obj is not None and self._screen_obj in QGuiApplication.screens():
-            return self._screen_obj
-        return QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
-
-    def _target_geometry(self) -> QRect:
-        ag = self._screen().availableGeometry()
-        edge = self.settings["edge"]
-        size = self.settings.size()
-        if edge in ("top", "bottom"):
-            w = round(ag.width() * size["span"] / 100)
-            h = round(ag.height() * size["depth"] / 100)
-            x = ag.x() + (ag.width() - w) // 2
-            y = ag.y() if edge == "top" else ag.y() + ag.height() - h
-        else:
-            w = round(ag.width() * size["depth"] / 100)
-            h = round(ag.height() * size["span"] / 100)
-            y = ag.y() + (ag.height() - h) // 2
-            x = ag.x() if edge == "left" else ag.x() + ag.width() - w
-        return QRect(x, y, w, h)
-
-    def _hidden_geometry(self, g: QRect) -> QRect:
-        edge = self.settings["edge"]
-        dx = {"left": -g.width(), "right": g.width()}.get(edge, 0)
-        dy = {"top": -g.height(), "bottom": g.height()}.get(edge, 0)
-        return g.translated(dx, dy)
-
-    def begin_resize(self) -> None:
-        ag = self._screen().availableGeometry()
-        vertical = self.settings["edge"] in ("top", "bottom")
-        self._resize_start = {
-            "depth_px": self.height() if vertical else self.width(),
-            "span_px": self.width() if vertical else self.height(),
-            "depth_axis": ag.height() if vertical else ag.width(),
-            "span_axis": ag.width() if vertical else ag.height(),
-        }
-
-    def drag_resize(self, role: str, delta: float) -> None:
-        st = self._resize_start
-        if not st:
-            return
-        size = self.settings.size()
-        if role == "depth":
-            px = max(120, st["depth_px"] + delta)
-            size["depth"] = max(10.0, min(100.0, px * 100 / st["depth_axis"]))
-        else:  # étendue : redimensionnement symétrique (fenêtre centrée)
-            px = max(240, st["span_px"] + 2 * delta)
-            size["span"] = max(20.0, min(100.0, px * 100 / st["span_axis"]))
-        self.setGeometry(self._target_geometry())
-
-    def end_resize(self) -> None:
-        self._resize_start = None
-        size = self.settings.size()
-        size["depth"] = round(size["depth"], 1)
-        size["span"] = round(size["span"], 1)
-        self.settings.save()  # mémorisé pour la prochaine session
-
-    def _animate(self, start: QRect, end: QRect, on_done=None) -> None:
-        if self._anim is not None:
-            self._anim.stop()
-            self._anim.deleteLater()
-            self._anim = None
-        ms = int(self.settings["anim_ms"])
-        if ms <= 0:
-            self.setGeometry(end)
-            if on_done:
-                on_done()
-            return
-        self._anim = QPropertyAnimation(self, b"geometry", self)
-        self._anim.setDuration(ms)
-        self._anim.setStartValue(start)
-        self._anim.setEndValue(end)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        if on_done:
-            self._anim.finished.connect(on_done)
-        self._anim.start()
-
-    def toggle(self) -> None:
-        if self.isVisible() and not self._hiding:
-            if self.isActiveWindow():
-                self.hide_animated()
-            else:
-                self._activate()
-        else:
-            self.show_animated()
-
-    def show_animated(self) -> None:
-        self._hiding = False
-        if not self.isVisible():
-            self._screen_obj = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
-        end = self._target_geometry()
-        if not self.isVisible():
-            self.setGeometry(self._hidden_geometry(end))
-            self.show()
-        self._activate()
-        self._animate(self.geometry(), end)
-
-    def hide_animated(self) -> None:
-        if not self.isVisible() or self._hiding:
-            return
-        self._hiding = True
-        self.save_session()
-        g = self.geometry()
-
-        def done():
-            if self._hiding:
-                self.hide()
-                self._hiding = False
-
-        self._animate(g, self._hidden_geometry(g), done)
 
     # --- Dialogues au premier plan ------------------------------------------
-    def dialog_opened(self, dlg: QDialog) -> None:
-        winapi.set_topmost(int(self.winId()), False)
-        dlg.finished.connect(lambda _r: QTimer.singleShot(0, self.dialog_closed))
-
-        def lift():
-            winapi.set_topmost(int(dlg.winId()), True, activate=True)
-            dlg.raise_()
-            dlg.activateWindow()
-
-        QTimer.singleShot(0, lift)
-
-    def dialog_closed(self) -> None:
-        """Rétablit « toujours au premier plan » quand plus aucun dialogue n'est ouvert."""
-        if self._native_dialog_depth:
-            return
-        if any(isinstance(w, QDialog) and w.isVisible() for w in QApplication.topLevelWidgets()):
-            return
-        winapi.set_topmost(int(self.winId()), True)
-
-    def native_dialog(self):
-        """Contexte pour les dialogues natifs de Windows (Ouvrir, Enregistrer, Imprimer)."""
-        window = self
-
-        class _Ctx:
-            def __enter__(self_):
-                window._native_dialog_depth += 1
-                winapi.set_topmost(int(window.winId()), False)
-
-            def __exit__(self_, *exc):
-                window._native_dialog_depth -= 1
-                if window._native_dialog_depth == 0:
-                    winapi.set_topmost(int(window.winId()), True)
-                    window._activate()
-                return False
-
-        return _Ctx()
-
-    def _activate(self) -> None:
-        self.raise_()
-        self.activateWindow()
-        winapi.force_foreground(int(self.winId()))
-        doc = self.current()
-        if doc:
-            doc.setFocus()
-
-    def _on_app_state(self, state) -> None:
-        if (state != Qt.ApplicationState.ApplicationActive and self.isVisible()
-                and self.settings["hide_on_focus_loss"] and not self.pinned
-                and self._resize_start is None and QApplication.activeModalWidget() is None):
-            self.hide_animated()
-
-    def _escape(self) -> None:
-        if self.find_bar.isVisible():
-            self.find_bar.close_bar()
-        else:
-            self.hide_animated()
 
     # ================================================================
     # Onglets
     # ================================================================
-    def docs(self) -> list[Document]:
-        return [w for w in (self.tabs.widget(i) for i in range(self.tabs.count())) if isinstance(w, Document)]
-
-    def current(self) -> Document | None:
-        w = self.tabs.currentWidget()
-        return w if isinstance(w, Document) else None
-
-    def _doc_call(self, method: str, *args) -> None:
-        doc = self.current()
-        if doc:
-            getattr(doc, method)(*args)
-            doc.setFocus()
-
-    def _next_untitled(self) -> str:
-        used = {d.untitled_name for d in self.docs() if d.path is None}
-        n = 1
-        while f"Sans titre {n}" in used:
-            n += 1
-        return f"Sans titre {n}"
-
-    def new_tab(self, text: str = "", path: str | None = None, focus: bool = True) -> Document:
-        doc = Document(self._next_untitled())
-        self._style_doc(doc)
-        if text:
-            doc.setPlainText(text)
-        doc.path = path
-        doc.document().setModified(False)
-        doc.document().modificationChanged.connect(lambda _m, d=doc: self._refresh_tab(d))
-        doc.textChanged.connect(self._on_text_changed)
-        doc.cursorPositionChanged.connect(self._update_status)
-        doc.currentCharFormatChanged.connect(lambda _f, d=doc: self._sync_format_bar(d))
-        doc.filesDropped.connect(self.open_files)
-        prev, self._guard_plus = self._guard_plus, True
-        idx = self.tabs.insertTab(self.tabs.indexOf(self._plus), doc, doc.title())
-        close = QToolButton(toolTip="Fermer l'onglet (Ctrl+W)")
-        close.setObjectName("TabClose")
-        close.setIcon(icon("close", palette(self.settings["theme"])["muted"], 14, stroke=2))
-        close.setIconSize(QSize(14, 14))
-        close.setAutoRaise(True)
-        close.setCursor(Qt.CursorShape.PointingHandCursor)
-        close.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        close.clicked.connect(lambda _=False, d=doc: self.close_tab(self.tabs.indexOf(d)))
-        self.tabs.tabBar().setTabButton(idx, QTabBar.ButtonPosition.RightSide, close)
-        if focus:
-            self.tabs.setCurrentIndex(idx)
-            doc.setFocus()
-        self._guard_plus = prev
-        self._refresh_tab(doc)
-        return doc
 
     # --- Menu contextuel et renommage des onglets ---------------------------
-    def _tab_context_menu(self, pos) -> None:
-        bar = self.tabs.tabBar()
-        index = bar.tabAt(pos)
-        doc = self.tabs.widget(index)
-        if not isinstance(doc, Document):
-            return
-        menu = QMenu(self)
-        menu.addAction("Renommer l'onglet…", lambda: self.rename_tab(index))
-        if doc.custom_title:
-            menu.addAction("Rétablir le nom d'origine", lambda: self._set_tab_title(doc, ""))
-        menu.addSeparator()
-        menu.addAction("Nouvel onglet", self.new_tab)
-        menu.addAction("Dupliquer l'onglet", lambda: self.duplicate_tab(doc))
-        menu.addSeparator()
-        if doc.path:
-            menu.addAction("Copier le chemin du fichier", lambda: QApplication.clipboard().setText(doc.path))
-            menu.addAction("Ouvrir le dossier", lambda: self._reveal(doc.path))
-            menu.addSeparator()
-        menu.addAction("Fermer l'onglet", lambda: self.close_tab(self.tabs.indexOf(doc)))
-        others = [d for d in self.docs() if d is not doc]
-        a = menu.addAction("Fermer les autres onglets", lambda: self._close_many(others))
-        a.setEnabled(bool(others))
-        right = self.docs()[self.docs().index(doc) + 1:]
-        a = menu.addAction("Fermer les onglets à droite", lambda: self._close_many(right))
-        a.setEnabled(bool(right))
-        menu.exec(bar.mapToGlobal(pos))
-        menu.deleteLater()
-
-    def rename_tab(self, index: int) -> None:
-        """Renommage directement dans l'onglet (Entrée = valider, Échap = annuler, vide = nom d'origine)."""
-        doc = self.tabs.widget(index)
-        if not isinstance(doc, Document):
-            return
-        self.tabs.setCurrentIndex(index)
-        bar = self.tabs.tabBar()
-        rect = bar.tabRect(index).adjusted(8, 6, -30, -4)
-        edit = QLineEdit(doc.title(), bar)
-        edit.setObjectName("TabRename")
-        edit.setGeometry(rect)
-        edit.selectAll()
-        edit.show()
-        edit.setFocus()
-        self._rename_edit = edit
-        done = {"v": False}
-
-        def finish(commit: bool) -> None:
-            if done["v"]:
-                return
-            done["v"] = True
-            if commit:
-                text = edit.text().strip()
-                default = Path(doc.path).name if doc.path else doc.untitled_name
-                self._set_tab_title(doc, "" if text in ("", default) else text)
-            edit.deleteLater()
-            self._rename_edit = None
-            doc.setFocus()
-
-        class _Keys(QObject):
-            def eventFilter(self_, obj, ev):  # noqa: N802
-                if ev.type() == QEvent.Type.ShortcutOverride and ev.key() == Qt.Key.Key_Escape:
-                    ev.accept()  # Échap annule le renommage au lieu de masquer la fenêtre
-                    return True
-                if ev.type() == QEvent.Type.KeyPress and ev.key() == Qt.Key.Key_Escape:
-                    finish(False)
-                    return True
-                if ev.type() == QEvent.Type.FocusOut:
-                    finish(True)
-                return False
-
-        keys = _Keys(edit)
-        edit.installEventFilter(keys)
-        edit.returnPressed.connect(lambda: finish(True))
-
-    def _set_tab_title(self, doc: Document, title: str) -> None:
-        doc.custom_title = title
-        self._refresh_tab(doc)
-        self._schedule_session()
-
-    def duplicate_tab(self, doc: Document) -> None:
-        copy = self.new_tab()
-        if doc.rich:
-            copy.setHtml(doc.toHtml())
-            copy.rich = True
-        else:
-            copy.setPlainText(doc.toPlainText())
-        copy.custom_title = f"{doc.title()} (copie)"
-        copy.document().setModified(True)
-        self._refresh_tab(copy)
-
-    def _close_many(self, docs: list) -> None:
-        for d in list(docs):
-            i = self.tabs.indexOf(d)
-            if i >= 0:
-                self.close_tab(i)
-
-    @staticmethod
-    def _reveal(path: str) -> None:
-        import subprocess
-
-        if winapi.IS_WINDOWS:
-            subprocess.Popen(["explorer", "/select,", str(Path(path))])
-        else:
-            from PySide6.QtCore import QUrl
-            from PySide6.QtGui import QDesktopServices
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(path).parent)))
-
-    def _keep_plus_last(self, _from: int, _to: int) -> None:
-        last = self.tabs.count() - 1
-        i = self.tabs.indexOf(self._plus)
-        if i != last and not self._guard_plus:
-            self._guard_plus = True
-            self.tabs.tabBar().moveTab(i, last)
-            self._guard_plus = False
-
-    def _refresh_tab(self, doc: Document) -> None:
-        i = self.tabs.indexOf(doc)
-        if i < 0:
-            return
-        self.tabs.setTabText(i, ("● " if doc.is_modified() else "") + doc.title())
-        tip = doc.path or doc.untitled_name
-        self.tabs.setTabToolTip(i, f"{tip}\nClic droit : renommer, dupliquer, fermer…")
-        if doc is self.current():
-            self._update_status()
-
-    def close_tab(self, index: int) -> None:
-        doc = self.tabs.widget(index)
-        if not isinstance(doc, Document):
-            return
-        if doc.is_modified() and not doc.document().isEmpty():
-            self.tabs.setCurrentIndex(index)
-            r = QMessageBox.question(
-                self, APP_NAME, f"Enregistrer les modifications de « {doc.title()} » ?",
-                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard
-                | QMessageBox.StandardButton.Cancel,
-            )
-            if r == QMessageBox.StandardButton.Cancel:
-                return
-            if r == QMessageBox.StandardButton.Save and not self._save(doc):
-                return
-        prev, self._guard_plus = self._guard_plus, True
-        self.tabs.removeTab(index)
-        if self.tabs.currentWidget() is self._plus and self.docs():
-            self.tabs.setCurrentIndex(max(0, min(index, len(self.docs())) - 1))
-        self._guard_plus = prev
-        doc.deleteLater()
-        if not self.docs():
-            self.new_tab()
-        self._schedule_session()
-
-    def _cycle(self, step: int) -> None:
-        docs = self.docs()
-        if docs:
-            cur = self.current()
-            i = docs.index(cur) if cur in docs else 0
-            self.tabs.setCurrentWidget(docs[(i + step) % len(docs)])
-
-    def _goto_tab(self, i: int) -> None:
-        docs = self.docs()
-        if docs:
-            self.tabs.setCurrentWidget(docs[-1] if i == 9 else docs[min(i - 1, len(docs) - 1)])
-
-    def _on_current_changed(self, _i: int) -> None:
-        if self.tabs.currentWidget() is self._plus:
-            if not self._guard_plus:
-                self.new_tab()
-            return
-        self._update_status()
-        doc = self.current()
-        if doc:
-            self._sync_format_bar(doc)
-            if self.isVisible():
-                doc.setFocus()
-
-    def _on_text_changed(self) -> None:
-        self._update_status()
-        self._schedule_session()
 
     # ================================================================
     # Mise en forme
     # ================================================================
-    def _sync_format_bar(self, doc: Document) -> None:
-        if doc is not self.current():
-            return
-        f = doc.currentCharFormat()
-        self.act_bold.setChecked(f.fontWeight() > QFont.Weight.Normal)
-        self.act_italic.setChecked(f.fontItalic())
-        self.act_underline.setChecked(f.fontUnderline())
-        self.act_strike.setChecked(f.fontStrikeOut())
-        size = doc.current_point_size()
-        self.size_btn.setText(f"{size:g} ▾")
-
-    def _custom_size(self) -> None:
-        doc = self.current()
-        if not doc:
-            return
-        size, ok = QInputDialog.getDouble(self, "Taille du texte", "Taille (pt) :", doc.current_point_size(), 4, 144, 1)
-        if ok:
-            self._doc_call("set_point_size", size)
-
-    def pick_color(self) -> None:
-        doc = self.current()
-        if not doc:
-            return
-        color = QColorDialog.getColor(doc.textColor(), self, "Couleur du texte")
-        if color.isValid():
-            doc.set_color(color)
-
-    def insert_table(self) -> None:
-        doc = self.current()
-        if not doc:
-            return
-        dlg = TableDialog(self)
-        if dlg.exec():
-            doc.insert_table(dlg.rows.value(), dlg.cols.value())
-            doc.setFocus()
-
-    def _table_op(self, op: str) -> None:
-        doc = self.current()
-        if doc and not doc.table_op(op):
-            self._info("Placez le curseur dans un tableau.")
-
-    def insert_image(self) -> None:
-        doc = self.current()
-        if not doc:
-            return
-        with self.native_dialog():
-            files, _ = QFileDialog.getOpenFileNames(self, "Insérer une image", str(Path.home() / "Pictures"),
-                                                    IMAGE_FILTER)
-        for f in files:
-            if not doc.insert_image_file(f):
-                QMessageBox.warning(self, APP_NAME, f"Image illisible :\n{f}")
-        doc.setFocus()
 
     # ================================================================
     # Correction orthographique et grammaticale
     # ================================================================
-    def check_spelling(self) -> None:
-        doc = self.current()
-        if not doc:
-            return
-        text = document_text(doc.document())
-        if not text.strip():
-            self._info("Rien à corriger.")
-            return
-        doc._spell_snapshot = text
-        self._info("Vérification orthographe et grammaire…", keep=True)
-        self.spell.check(doc, text, self.settings["spell_server"], self.settings["spell_language"])
-
-    def _spell_done(self, doc: Document, issues: list) -> None:
-        if doc not in self.docs():
-            return
-        if document_text(doc.document()) != getattr(doc, "_spell_snapshot", None):
-            self._info("Le texte a changé pendant la vérification : relancez (F7).")
-            return
-        doc.set_issues(issues)
-        n = len(issues)
-        if n == 0:
-            self._info("✓ Aucune faute trouvée.")
-        else:
-            sp = sum(1 for i in issues if i.kind == "spelling")
-            self._info(f"{n} correction(s) proposée(s) : {sp} orthographe, {n - sp} grammaire/style — "
-                       "clic droit sur le mot souligné, F8 = suivante.")
-            if doc is self.current():
-                doc.next_issue()
-
-    def _spell_failed(self, doc: Document, msg: str) -> None:
-        self._info("Correction indisponible.")
-        QMessageBox.warning(self, APP_NAME, f"La correction n'a pas pu être effectuée :\n{msg}\n\n"
-                            f"Serveur : {self.settings['spell_server']}")
 
     # --- Correction automatique par IA ------------------------------------
-    def ai_correct(self) -> None:
-        doc = self.current()
-        if not doc or self._ai_busy:
-            return
-        cfg = self.settings
-        ep = resolve_ai(cfg)
-        if not ep["key"] and ep["id"] not in ("ollama", "openai"):
-            QMessageBox.information(self, APP_NAME, "Configurez d'abord l'IA : choisissez un fournisseur "
-                                    "(Google Gemini et Mistral sont gratuits) et collez votre clé API.")
-            self.open_settings(tab=3)
-            return
-        selection = doc.textCursor().hasSelection()
-        blocks = collect_blocks(doc, selection_only=selection)
-        if not blocks:
-            self._info("Rien à corriger.")
-            return
-        self._ai_busy = True
-        doc._ai_snapshot = [t for _, t in blocks]
-        doc.setReadOnly(True)  # évite tout décalage pendant la requête
-        for aid in ("spell.ai",):
-            self._actions[aid][0].setEnabled(False)
-        what = "la sélection" if selection else "la note"
-        model = ep["model"]
-        self._info(f"✦ Correction de {what} par IA ({model})…", keep=True)
-        self._ai_cfg = dict(cfg)
-        self.ai.correct(doc, blocks, self._ai_cfg)
-
-    def _ai_finish(self, doc: Document) -> None:
-        self.update_usage()
-        self._ai_busy = False
-        self._actions["spell.ai"][0].setEnabled(True)
-        if doc in self.docs():
-            doc.setReadOnly(False)
-
-    def _ai_done(self, doc: Document, blocks: list, corrected: list) -> None:
-        self._ai_finish(doc)
-        if doc not in self.docs():
-            return
-        doc._applying_ai = True
-        try:
-            paras, edits, spans = apply_corrections(doc, blocks, corrected)
-        finally:
-            doc._applying_ai = False
-        doc.issues = []  # les soulignements LanguageTool ne correspondent plus
-        used = getattr(self, "_ai_cfg", {}).get("_model_used")
-        via = f" (via {used}, modèle habituel surchargé)" if used and used != resolve_ai(self.settings)["model"] else ""
-        if edits:
-            doc.flash_ranges(spans)
-            self._info(f"✦ {edits} correction(s) dans {paras} paragraphe(s){via} — surlignées en vert, "
-                       "Ctrl+Z pour tout annuler.")
-        else:
-            doc._paint_issues()
-            self._info("✦ Aucune faute trouvée par l'IA.")
-
-    def _ai_failed(self, doc: Document, msg: str) -> None:
-        self._ai_finish(doc)
-        self._info("Correction IA impossible.")
-        QMessageBox.warning(self, APP_NAME, f"La correction par IA a échoué :\n{msg}")
-
-    def next_issue(self) -> None:
-        doc = self.current()
-        if doc and not doc.next_issue():
-            self._info("Aucune faute en attente (F7 pour vérifier).")
 
     # ================================================================
     # Fichiers
     # ================================================================
-    def open_dialog(self) -> None:
-        cur = self.current()
-        start = str(Path(cur.path).parent) if cur and cur.path else str(Path.home() / "Documents")
-        with self.native_dialog():
-            files, _ = QFileDialog.getOpenFileNames(self, "Ouvrir", start, OPEN_FILTER)
-        self.open_files(files)
-
-    def open_files(self, files: list[str]) -> None:
-        for f in files:
-            p = str(Path(f).resolve())
-            if Path(p).suffix.lower() in IMAGE_EXTS:
-                doc = self.current() or self.new_tab()
-                doc.insert_image_file(p)
-                continue
-            existing = next((d for d in self.docs() if d.path and Path(d.path) == Path(p)), None)
-            if existing:
-                self.tabs.setCurrentWidget(existing)
-                continue
-            if not Path(p).is_file():
-                continue
-            cur = self.current()
-            doc = cur if cur and cur.is_empty_untitled() and not cur.is_modified() else self.new_tab()
-            try:
-                doc.load(p)
-            except OSError as exc:
-                QMessageBox.warning(self, APP_NAME, f"Impossible d'ouvrir {p} :\n{exc}")
-                continue
-            self.tabs.setCurrentWidget(doc)
-            self._refresh_tab(doc)
-        self._schedule_session()
-
-    def _ask_save_path(self, doc: Document) -> str | None:
-        fmt = doc.fmt
-        base = Path(doc.path).stem if doc.path else doc.title()
-        folder = Path(doc.path).parent if doc.path else Path.home() / "Documents"
-        suggested = str(folder / f"{base}.{'html' if fmt == 'html' else fmt}")
-        filters = ";;".join(list(SAVE_FILTERS.values()) + ["Tous les fichiers (*)"])
-        with self.native_dialog():
-            path, chosen = QFileDialog.getSaveFileName(self, "Enregistrer sous", suggested, filters,
-                                                       SAVE_FILTERS.get(fmt, ""))
-        if not path:
-            return None
-        if not Path(path).suffix:
-            ext = next((k for k, v in SAVE_FILTERS.items() if v == chosen), "txt")
-            path += f".{ext}"
-        return path
-
-    def _save(self, doc: Document, save_as: bool = False) -> bool:
-        path = doc.path
-        if save_as or not path:
-            path = self._ask_save_path(doc)
-            if not path:
-                return False
-        if doc.rich and format_for_path(path) == "txt":
-            box = QMessageBox(QMessageBox.Icon.Question, APP_NAME,
-                              "Ce document contient de la mise en forme, des tableaux ou des images, "
-                              "qui seront perdus en texte brut (.txt).", parent=self)
-            as_html = box.addButton("Enregistrer en .html", QMessageBox.ButtonRole.AcceptRole)
-            box.addButton("Texte brut quand même", QMessageBox.ButtonRole.DestructiveRole)
-            cancel = box.addButton("Annuler", QMessageBox.ButtonRole.RejectRole)
-            box.exec()
-            if box.clickedButton() is cancel:
-                return False
-            if box.clickedButton() is as_html:
-                path = str(Path(path).with_suffix(".html"))
-        try:
-            doc.save(path)
-        except OSError as exc:
-            QMessageBox.warning(self, APP_NAME, f"Échec de l'enregistrement :\n{exc}")
-            return False
-        self._refresh_tab(doc)
-        self._info(f"Enregistré : {Path(path).name}")
-        self._schedule_session()
-        return True
-
-    def save_current(self) -> None:
-        if self.current():
-            self._save(self.current())
-
-    def save_current_as(self) -> None:
-        if self.current():
-            self._save(self.current(), save_as=True)
-
-    def save_all(self) -> None:
-        for d in self.docs():
-            if d.is_modified() and d.path:
-                self._save(d)
-
-    def export_pdf(self, path: str | None = None) -> bool:
-        doc = self.current()
-        if not doc:
-            return False
-        if path is None:
-            base = Path(doc.path).stem if doc.path else doc.title()
-            folder = Path(doc.path).parent if doc.path else Path.home() / "Documents"
-            with self.native_dialog():
-                path, _ = QFileDialog.getSaveFileName(self, "Exporter en PDF", str(folder / f"{base}.pdf"),
-                                                      "PDF (*.pdf)")
-            if not path:
-                return False
-            if not path.lower().endswith(".pdf"):
-                path += ".pdf"
-        from PySide6.QtPrintSupport import QPrinter
-
-        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-        printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
-        printer.setOutputFileName(path)
-        printer.setPageLayout(QPageLayout(QPageSize(QPageSize.PageSizeId.A4), QPageLayout.Orientation.Portrait,
-                                          QMarginsF(15, 15, 15, 15), QPageLayout.Unit.Millimeter))
-        printer.setDocName(doc.title())
-        clone = doc.document().clone()
-        clone.setDefaultFont(doc.document().defaultFont())
-        clone.print_(printer)
-        self._info(f"PDF exporté : {Path(path).name}")
-        return True
-
-    def _set_encoding(self, enc: str) -> None:
-        if self.current():
-            self.current().encoding = enc
-            self.current().document().setModified(True)
-            self._update_status()
-
-    def _set_eol(self, eol: str) -> None:
-        if self.current():
-            self.current().eol = eol
-            self.current().document().setModified(True)
-            self._update_status()
-
-    def print_current(self) -> None:
-        doc = self.current()
-        if not doc:
-            return
-        from PySide6.QtPrintSupport import QPrintDialog, QPrinter
-
-        printer = QPrinter()
-        dlg = QPrintDialog(printer, self)
-        with self.native_dialog():
-            accepted = dlg.exec()
-        if accepted:
-            doc.document().print_(printer)
 
     # ================================================================
     # Édition
     # ================================================================
-    def go_to_line(self) -> None:
-        doc = self.current()
-        if not doc:
-            return
-        total = doc.document().blockCount()
-        line, ok = QInputDialog.getInt(self, "Atteindre", f"Ligne (1 – {total}) :",
-                                       doc.cursor_info()[0], 1, total)
-        if ok:
-            doc.go_to_line(line)
-
-    def insert_datetime(self) -> None:
-        if self.current():
-            self.current().insertPlainText(datetime.now().strftime("%H:%M %d/%m/%Y"))
-
-    def duplicate_line(self) -> None:
-        doc = self.current()
-        if not doc:
-            return
-        c = doc.textCursor()
-        text = c.block().text()
-        c.movePosition(c.MoveOperation.EndOfBlock)
-        c.insertText("\n" + text)
-        doc.setTextCursor(c)
 
     # ================================================================
     # Barre d'état
@@ -1423,51 +673,6 @@ class QuakeWindow(QWidget):
             self._info_timer.stop()
         else:
             self._info_timer.start()
-
-    def update_usage(self) -> None:
-        """Rafraîchit l'indicateur de consommation de l'IA sélectionnée."""
-        from . import usage
-
-        ep = resolve_ai(self.settings)
-        pid = ep["id"]
-        name = ep["meta"]["label"].split(" —")[0].replace("Autre service compatible OpenAI…", "IA")
-        name = name.replace("Google ", "")
-        if pid == "ollama":
-            self.usage.label.setText(f"✦ {name}")
-            self.usage.bar.hide()
-            self.usage.pct.setText("local · illimité")
-            self.usage.setToolTip("IA locale : aucun quota.")
-            self.usage.setProperty("level", "ok")
-        else:
-            quota = int((self.settings.get("ai_quotas") or {}).get(pid, 0))
-            st = usage.status(pid, quota)
-            self.usage.label.setText(f"✦ {name}")
-            tip = [f"{name} — aujourd'hui : {st['requests']} requête(s), {usage.tokens_label(st['tokens'])} jetons",
-                   f"Remise à zéro dans {st['reset']}"
-                   + (" (minuit, heure du Pacifique)" if pid == "gemini" else "")]
-            if st["pct_used"] is None:
-                self.usage.bar.hide()
-                self.usage.pct.setText(f"{st['requests']} req. aujourd'hui")
-                tip.append("Pour afficher un pourcentage, indiquez votre quota gratuit (requêtes/jour) "
-                           "dans Paramètres → Correction.")
-                level = "ok"
-            else:
-                used = st["pct_used"]
-                self.usage.bar.show()
-                self.usage.bar.setValue(int(used * 10))
-                if st["exhausted"]:
-                    self.usage.pct.setText("quota atteint")
-                else:
-                    self.usage.pct.setText(f"{used:.0f} % utilisé · {100 - used:.0f} % libre")
-                tip.append(f"Quota : {st['limit']} requêtes/jour (source : {st['source']})")
-                if st["source"] == "QuakePad":
-                    tip.append("Compté par QuakePad sur ce PC : l'usage du même projet ailleurs n'est pas inclus.")
-                level = "high" if used >= 90 else "mid" if used >= 70 else "ok"
-            self.usage.setToolTip("\n".join(tip) + "\n\nClic : paramètres de correction")
-            self.usage.setProperty("level", level)
-        for w in (self.usage, self.usage.pct, self.usage.bar):
-            w.style().unpolish(w)
-            w.style().polish(w)
 
     def _update_status(self) -> None:
         doc = self.current()
@@ -1490,74 +695,20 @@ class QuakeWindow(QWidget):
     # ================================================================
     # Session (onglets restaurés, y compris non enregistrés, images et mise en forme)
     # ================================================================
-    def _schedule_session(self) -> None:
-        self._session_timer.start()
-
-    def save_session(self) -> None:
-        tabs = []
-        for d in self.docs():
-            if d.is_empty_untitled():
-                continue
-            entry = {
-                "path": d.path, "untitled": d.untitled_name, "title": d.custom_title, "encoding": d.encoding, "eol": d.eol,
-                "modified": d.is_modified(), "rich": d.rich, "cursor": d.textCursor().position(),
-            }
-            if d.is_modified() or not d.path:
-                entry["html" if d.rich else "content"] = d.toHtml() if d.rich else d.toPlainText()
-            tabs.append(entry)
-        cur = self.current()
-        data = {"version": 2, "current": self.docs().index(cur) if cur in self.docs() else 0, "tabs": tabs}
-        try:
-            tmp = self._session_path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-            tmp.replace(self._session_path)
-        except OSError:
-            pass
-
-    def restore_session(self) -> None:
-        try:
-            data = json.loads(self._session_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return
-        for t in data.get("tabs", []):
-            doc = self.new_tab(focus=False)
-            doc.untitled_name = t.get("untitled") or doc.untitled_name
-            doc.custom_title = t.get("title") or ""
-            path = t.get("path")
-            try:
-                if "html" in t:
-                    doc.setHtml(t["html"])
-                    doc.rich = True
-                elif "content" in t and t["content"] is not None:
-                    doc.setPlainText(t["content"])
-                elif path and Path(path).is_file():
-                    doc.load(path)
-                else:
-                    self.tabs.removeTab(self.tabs.indexOf(doc))
-                    doc.deleteLater()
-                    continue
-                if "html" in t or t.get("content") is not None:
-                    doc.path = path
-                    doc.encoding = t.get("encoding", "utf-8")
-                    doc.eol = t.get("eol", "\r\n")
-                    doc.document().setModified(bool(t.get("modified")))
-            except OSError:
-                continue
-            c = doc.textCursor()
-            c.setPosition(min(int(t.get("cursor", 0)), doc.document().characterCount() - 1))
-            doc.setTextCursor(c)
-            self._refresh_tab(doc)
-        docs = self.docs()
-        cur = int(data.get("current", 0))
-        if 0 <= cur < len(docs):
-            self.tabs.setCurrentWidget(docs[cur])
 
     # ================================================================
     # Divers
     # ================================================================
+    def open_data_dir(self) -> None:
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(app_dir())))
+
     def about(self) -> None:
         QMessageBox.about(
-            self, f"À propos de {APP_NAME}",
+            self,
+            f"À propos de {APP_NAME}",
             f"<b>{APP_NAME} {APP_VERSION}</b><br>Bloc-notes déroulant façon Quake.<br>"
             f"Raccourci : <b>{self.settings['hotkey'].get('label', '')}</b><br><br>"
             "Correction : LanguageTool (languagetool.org)<br>"

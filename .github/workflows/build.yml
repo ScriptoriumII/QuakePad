@@ -1,0 +1,39 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  windows-app:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -r requirements.txt pyinstaller
+      - name: Build exe
+        run: >
+          pyinstaller --noconfirm --clean --onefile --windowed --name QuakePad
+          --icon assets\quakepad.ico --add-data "assets;assets" run_quakepad.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QuakePad-windows
+          path: windows/dist/QuakePad.exe
+
+  chrome-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Zip extension
+        run: cd chrome-extension && zip -r ../QuakePad-chrome-extension.zip .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QuakePad-chrome-extension
+          path: QuakePad-chrome-extension.zip

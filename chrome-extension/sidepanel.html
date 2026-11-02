@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QuakePad</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div class="edge"></div>
+
+  <header class="topbar">
+    <nav id="tabs" class="tabs" role="tablist" aria-label="Notes"></nav>
+    <div class="tools">
+      <button id="btn-new" title="Nouvelle note (Alt+N)" aria-label="Nouvelle note">+</button>
+      <button id="btn-menu" title="Menu" aria-label="Menu" aria-haspopup="true">☰</button>
+    </div>
+  </header>
+
+  <div id="menu" class="menu" hidden role="menu">
+    <button data-cmd="import">Importer un fichier…</button>
+    <button data-cmd="export">Exporter en .txt <kbd>Ctrl+S</kbd></button>
+    <button data-cmd="exportAll">Exporter toutes les notes</button>
+    <hr>
+    <button data-cmd="find">Rechercher <kbd>Ctrl+F</kbd></button>
+    <button data-cmd="replace">Remplacer <kbd>Ctrl+H</kbd></button>
+    <button data-cmd="date">Insérer date/heure <kbd>F5</kbd></button>
+    <hr>
+    <button data-cmd="wrap" data-check>Retour à la ligne <kbd>Alt+Z</kbd></button>
+    <button data-cmd="theme">Thème : <span id="theme-name"></span></button>
+    <button data-cmd="zoomIn">Zoom avant <kbd>Alt+=</kbd></button>
+    <button data-cmd="zoomOut">Zoom arrière <kbd>Alt+-</kbd></button>
+    <button data-cmd="zoomReset">Zoom par défaut <kbd>Alt+0</kbd></button>
+    <hr>
+    <button data-cmd="rename">Renommer la note <kbd>F2</kbd></button>
+    <button data-cmd="close" class="danger">Supprimer la note <kbd>Alt+W</kbd></button>
+    <hr>
+    <button data-cmd="shortcuts">Modifier le raccourci Alt+Q…</button>
+  </div>
+
+  <main>
+    <textarea id="editor" spellcheck="false" autocomplete="off" aria-label="Contenu de la note"
+              placeholder="Écrivez… tout est enregistré automatiquement."></textarea>
+  </main>
+
+  <section id="findbar" class="findbar" hidden>
+    <div class="row">
+      <input id="find" type="text" placeholder="Rechercher" aria-label="Rechercher">
+      <label title="Respecter la casse"><input id="opt-case" type="checkbox">Aa</label>
+      <label title="Mot entier"><input id="opt-word" type="checkbox">Mot</label>
+      <label title="Expression régulière ($1 dans le remplacement)"><input id="opt-regex" type="checkbox">.*</label>
+      <button id="find-prev" title="Précédent (Maj+Entrée)">↑</button>
+      <button id="find-next" title="Suivant (Entrée)">↓</button>
+      <button id="find-close" title="Fermer (Échap)">✕</button>
+    </div>
+    <div class="row" id="replace-row">
+      <input id="replace" type="text" placeholder="Remplacer par" aria-label="Remplacer par">
+      <button id="replace-one">Remplacer</button>
+      <button id="replace-all">Tout</button>
+    </div>
+  </section>
+
+  <footer class="status">
+    <span id="st-saved"></span>
+    <span class="spacer"></span>
+    <span id="st-pos"></span>
+    <span id="st-len"></span>
+    <span id="st-zoom"></span>
+  </footer>
+
+  <input id="file-input" type="file" accept=".txt,.md,.log,.json,.csv,.ini,.cfg,.yaml,.yml,.ps1,.py,.sh,text/*" multiple hidden>
+  <script src="sidepanel.js"></script>
+</body>
+</html>

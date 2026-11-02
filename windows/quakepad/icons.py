@@ -25,6 +25,8 @@ _PATHS = {
     "spell": '<path d="M3 15l4-10 4 10M4.5 11.5h5"/><path d="M12 15l3 3 6-7"/>',
     "pdf": '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/>'
            '<path d="M8 14h1.5a1.5 1.5 0 0 0 0-3H8v6M13 11v6h1a3 3 0 0 0 0-6z"/>',
+    "ai": '<path d="M10 3l1.6 4.4L16 9l-4.4 1.6L10 15l-1.6-4.4L4 9l4.4-1.6z"/>'
+          '<path d="M14.5 17.5l2 2 4-4.5"/>',
     "plus": '<path d="M12 5v14M5 12h14"/>',
     "pin": '<path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/>',
     "menu": '<path d="M4 7h16M4 12h16M4 17h16"/>',

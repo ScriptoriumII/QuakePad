@@ -186,3 +186,52 @@ def set_start_with_windows(enabled: bool) -> bool:
         return True
     except OSError:
         return False
+
+
+# --- Chiffrement des secrets (DPAPI : lié au compte Windows de l'utilisateur) ---------
+_DPAPI_PREFIX = "dpapi:"
+
+
+def protect(value: str) -> str:
+    if not value or not IS_WINDOWS:
+        return value
+    import base64
+
+    class BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    raw = value.encode("utf-8")
+    buf = ctypes.create_string_buffer(raw, len(raw))
+    blob_in = BLOB(len(raw), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)))
+    blob_out = BLOB()
+    crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
+    if not crypt32.CryptProtectData(ctypes.byref(blob_in), None, None, None, None, 0x1, ctypes.byref(blob_out)):
+        return value
+    try:
+        data = ctypes.string_at(blob_out.pbData, blob_out.cbData)
+    finally:
+        kernel32.LocalFree(blob_out.pbData)
+    return _DPAPI_PREFIX + base64.b64encode(data).decode("ascii")
+
+
+def unprotect(value: str) -> str:
+    if not value or not value.startswith(_DPAPI_PREFIX):
+        return value or ""
+    if not IS_WINDOWS:
+        return ""
+    import base64
+
+    class BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    raw = base64.b64decode(value[len(_DPAPI_PREFIX):])
+    buf = ctypes.create_string_buffer(raw, len(raw))
+    blob_in = BLOB(len(raw), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)))
+    blob_out = BLOB()
+    crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
+    if not crypt32.CryptUnprotectData(ctypes.byref(blob_in), None, None, None, None, 0x1, ctypes.byref(blob_out)):
+        return ""
+    try:
+        return ctypes.string_at(blob_out.pbData, blob_out.cbData).decode("utf-8")
+    finally:
+        kernel32.LocalFree(blob_out.pbData)

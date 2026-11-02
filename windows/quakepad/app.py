@@ -51,6 +51,9 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setQuitOnLastWindowClosed(False)
+    # Le style natif Windows 11 dessine lui-même le fond des menus (sombre/translucide) et ignore
+    # les couleurs du thème : Fusion applique le thème QuakePad partout de façon cohérente.
+    app.setStyle("Fusion")
 
     # Menus standards de Qt (clic droit : Copier, Coller…) en français
     from PySide6.QtCore import QLibraryInfo, QLocale, QTranslator

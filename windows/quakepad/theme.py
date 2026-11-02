@@ -32,6 +32,24 @@ def palette(name: str) -> dict:
     return PALETTES.get(resolve(name), PALETTES["dark"])
 
 
+def qpalette(name: str):
+    """Palette Qt cohérente avec le thème (menus, dialogues, champs non couverts par la feuille de style)."""
+    from PySide6.QtGui import QColor, QPalette
+
+    p = palette(name)
+    pal = QPalette()
+    R = QPalette.ColorRole
+    for role, key in ((R.Window, "surface"), (R.WindowText, "fg"), (R.Base, "bg"), (R.AlternateBase, "surface"),
+                      (R.Text, "fg"), (R.Button, "raised"), (R.ButtonText, "fg"), (R.ToolTipBase, "surface"),
+                      (R.ToolTipText, "fg"), (R.Highlight, "selection"), (R.HighlightedText, "fg"),
+                      (R.PlaceholderText, "muted"), (R.Link, "accent"), (R.Light, "raised"), (R.Mid, "border"),
+                      (R.Dark, "border"), (R.Midlight, "raised"), (R.Shadow, "bg")):
+        pal.setColor(role, QColor(p[key]))
+    for role in (R.WindowText, R.Text, R.ButtonText):
+        pal.setColor(QPalette.ColorGroup.Disabled, role, QColor(p["muted"]))
+    return pal
+
+
 def stylesheet(name: str, assets: str = "") -> str:
     p = palette(name)
     theme = resolve(name)
@@ -83,9 +101,14 @@ QPushButton {{
 }}
 QPushButton:hover {{ border-color: {p['accent']}; }}
 QPushButton:default {{ background: {p['accent']}; color: {p['accent_fg']}; border-color: {p['accent']}; }}
-QMenu {{ background: {p['surface']}; border: 1px solid {p['border']}; padding: 4px; }}
-QMenu::item {{ padding: 5px 24px 5px 12px; border-radius: 3px; }}
-QMenu::item:selected {{ background: {p['raised']}; }}
+QMenu {{ background: {p['surface']}; color: {p['fg']}; border: 1px solid {p['border']}; padding: 4px; }}
+QMenu::item {{ background: transparent; color: {p['fg']}; padding: 5px 24px 5px 12px; border-radius: 3px; }}
+QMenu::item:selected {{ background: {p['raised']}; color: {p['fg']}; }}
+QMenu::item:disabled {{ color: {p['muted']}; }}
+QMenu::icon {{ padding-left: 6px; }}
+QToolTip {{ background: {p['surface']}; color: {p['fg']}; border: 1px solid {p['border']}; padding: 4px; }}
+QHeaderView::section {{ background: {p['surface']}; color: {p['fg']}; border: none; padding: 4px; }}
+QTableWidget {{ background: {p['bg']}; gridline-color: {p['border']}; }}
 QMenu::separator {{ height: 1px; background: {p['border']}; margin: 4px 6px; }}
 QDialog {{ background: {p['surface']}; }}
 QCheckBox::indicator {{ width: 14px; height: 14px; }}

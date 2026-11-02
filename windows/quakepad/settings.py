@@ -7,7 +7,8 @@ import os
 from pathlib import Path
 
 APP_NAME = "QuakePad"
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.2.0"
+SECRET_KEYS = ("anthropic_key", "openai_key")
 
 # Scan code 0x29 = touche située sous Échap (« ² » en AZERTY, « ` » en QWERTY),
 # la même que celle utilisée par le mode Quake de Windows Terminal.
@@ -47,6 +48,12 @@ DEFAULTS: dict = {
     "shortcuts": {},  # identifiant d'action -> séquence personnalisée
     "spell_server": "https://api.languagetool.org/v2/check",
     "spell_language": "fr",
+    "ai_provider": "anthropic",  # anthropic | openai
+    "anthropic_key": "",  # chiffrée avec DPAPI (compte Windows) dans le fichier
+    "anthropic_model": "claude-haiku-5-5",
+    "openai_base": "http://localhost:11434/v1",
+    "openai_key": "",
+    "openai_model": "mistral-nemo",
     "start_with_windows": False,
     "first_run": True,
 }
@@ -85,6 +92,9 @@ class Settings(dict):
                             s["sizes"][edge].update(size)
                 elif key in DEFAULTS:
                     s[key] = value
+        from .winapi import unprotect
+        for k in SECRET_KEYS:
+            s[k] = unprotect(s.get(k, ""))
         if s["edge"] not in EDGES:
             s["edge"] = "top"
         return s
@@ -93,6 +103,11 @@ class Settings(dict):
         return self["sizes"][edge or self["edge"]]
 
     def save(self) -> None:
+        from .winapi import protect
+
+        data = dict(self)
+        for k in SECRET_KEYS:  # clés API jamais écrites en clair sous Windows
+            data[k] = protect(data.get(k, ""))
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, self.path)

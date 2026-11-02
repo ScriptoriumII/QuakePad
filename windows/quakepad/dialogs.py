@@ -6,7 +6,7 @@ import copy
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFontComboBox, QFormLayout,
+    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFontComboBox, QFormLayout, QGroupBox,
     QHBoxLayout, QHeaderView, QKeySequenceEdit, QLabel, QLineEdit, QMessageBox, QPushButton, QSlider,
     QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
@@ -114,7 +114,7 @@ class SettingsDialog(QDialog):
     def __init__(self, settings: dict, actions: list[tuple[str, str, str, str]], parent=None):
         super().__init__(parent)
         self.setWindowTitle("Paramètres de QuakePad")
-        self.setMinimumSize(560, 520)
+        self.setMinimumSize(600, 560)
         s = settings
         self._sizes = copy.deepcopy(s["sizes"])
 
@@ -195,24 +195,71 @@ class SettingsDialog(QDialog):
         tabs.addTab(sc, "Raccourcis")
 
         # --- Correction ------------------------------------------------------
+        spell = QWidget()
+        sv = QVBoxLayout(spell)
+
+        ai_box = QGroupBox("Correction automatique par IA (icône ✦ ou Ctrl+F7)")
+        af = QFormLayout(ai_box)
+        self.ai_provider = QComboBox()
+        self.ai_provider.addItem("Claude — API Anthropic", "anthropic")
+        self.ai_provider.addItem("IA compatible OpenAI — Ollama, LM Studio, Mistral…", "openai")
+        self.ai_provider.setCurrentIndex(max(0, self.ai_provider.findData(s["ai_provider"])))
+        af.addRow("Fournisseur", self.ai_provider)
+
+        self.anthropic_key = QLineEdit(s["anthropic_key"])
+        self.anthropic_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.anthropic_key.setPlaceholderText("sk-ant-…  (console.anthropic.com → API Keys)")
+        self.anthropic_model = QComboBox(editable=True)
+        self.anthropic_model.addItems(["claude-haiku-5-5", "claude-sonnet-5-5"])
+        self.anthropic_model.setEditText(s["anthropic_model"])
+        self.anthropic_rows = [("Clé API", self.anthropic_key), ("Modèle", self.anthropic_model)]
+
+        self.openai_base = QLineEdit(s["openai_base"])
+        self.openai_base.setPlaceholderText("http://localhost:11434/v1")
+        self.openai_key = QLineEdit(s["openai_key"])
+        self.openai_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.openai_key.setPlaceholderText("Facultative pour Ollama / LM Studio")
+        self.openai_model = QLineEdit(s["openai_model"])
+        self.openai_rows = [("Adresse de l'API", self.openai_base), ("Clé API", self.openai_key),
+                            ("Modèle", self.openai_model)]
+        for label, w in self.anthropic_rows + self.openai_rows:
+            af.addRow(label, w)
+        self._ai_form = af
+
+        test_row = QHBoxLayout()
+        self.test_btn = QPushButton("Tester la connexion")
+        self.test_btn.clicked.connect(self._test_ai)
+        self.test_result = QLabel()
+        self.test_result.setWordWrap(True)
+        test_row.addWidget(self.test_btn)
+        test_row.addWidget(self.test_result, 1)
+        af.addRow(test_row)
+        self.ai_note = QLabel()
+        self.ai_note.setWordWrap(True)
+        af.addRow(self.ai_note)
+        self.ai_provider.currentIndexChanged.connect(self._ai_provider_changed)
+        self._ai_provider_changed()
+        sv.addWidget(ai_box)
+
+        lt_box = QGroupBox("Vérification mot par mot — LanguageTool (icône A✓ ou F7)")
+        lf = QFormLayout(lt_box)
         self.spell_server = QLineEdit(s["spell_server"])
         self.spell_lang = QComboBox()
         for code, label in (("fr", "Français"), ("auto", "Détection automatique"), ("en-US", "Anglais (US)"),
                             ("en-GB", "Anglais (GB)"), ("de-DE", "Allemand"), ("es", "Espagnol"), ("it", "Italien")):
             self.spell_lang.addItem(label, code)
         self.spell_lang.setCurrentIndex(max(0, self.spell_lang.findData(s["spell_language"])))
-        spell = QWidget()
-        sp = QFormLayout(spell)
-        sp.addRow("Langue", self.spell_lang)
-        sp.addRow("Serveur LanguageTool", self.spell_server)
+        lf.addRow("Langue", self.spell_lang)
+        lf.addRow("Serveur", self.spell_server)
         note = QLabel(
-            "<small>La correction envoie le texte de la note au serveur indiqué. Le serveur public "
-            "(api.languagetool.org) est gratuit mais limité (20 requêtes/min). Pour garder vos notes "
-            "en interne, hébergez LanguageTool (ex. Docker <code>erikvl87/languagetool</code>) et "
-            "indiquez <code>http://serveur:8010/v2/check</code>.</small>")
+            "<small>Envoie le texte au serveur indiqué. Serveur public gratuit mais limité ; pour rester en "
+            "interne : Docker <code>erikvl87/languagetool</code> puis <code>http://serveur:8010/v2/check</code>.</small>")
         note.setWordWrap(True)
-        sp.addRow(note)
+        lf.addRow(note)
+        sv.addWidget(lt_box)
+        sv.addStretch(1)
         tabs.addTab(spell, "Correction")
+        self.tabs = tabs
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Annuler")
@@ -265,7 +312,50 @@ class SettingsDialog(QDialog):
             "shortcuts": self.shortcuts.overrides(),
             "spell_server": self.spell_server.text().strip() or DEFAULTS["spell_server"],
             "spell_language": self.spell_lang.currentData(),
+            **self._ai_values(),
         }
+
+    # --- IA ------------------------------------------------------------------
+    def _ai_values(self) -> dict:
+        return {
+            "ai_provider": self.ai_provider.currentData(),
+            "anthropic_key": self.anthropic_key.text().strip(),
+            "anthropic_model": self.anthropic_model.currentText().strip() or DEFAULTS["anthropic_model"],
+            "openai_base": self.openai_base.text().strip() or DEFAULTS["openai_base"],
+            "openai_key": self.openai_key.text().strip(),
+            "openai_model": self.openai_model.text().strip() or DEFAULTS["openai_model"],
+        }
+
+    def _ai_provider_changed(self) -> None:
+        anthropic = self.ai_provider.currentData() == "anthropic"
+        for rows, visible in ((self.anthropic_rows, anthropic), (self.openai_rows, not anthropic)):
+            for _label, w in rows:
+                self._ai_form.setRowVisible(w, visible)
+        self.ai_note.setText(
+            "<small>Le texte est envoyé à Anthropic. <code>claude-haiku-5-5</code> : rapide et économique "
+            "(une note courante coûte une fraction de centime). Clé chiffrée avec votre compte Windows (DPAPI).</small>"
+            if anthropic else
+            "<small>Pour une IA 100 % locale : installez Ollama puis <code>ollama pull mistral-nemo</code>. "
+            "Rien ne quitte le PC. La qualité dépend du modèle choisi.</small>")
+        self.test_result.setText("")
+
+    def _test_ai(self) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        from .ai import AIError, test_connection
+
+        self.test_result.setText("Test en cours…")
+        self.test_btn.setEnabled(False)
+        QApplication.processEvents()
+        try:
+            out = test_connection(self._ai_values())
+            self.test_result.setText(f"✓ OK : « {out} »")
+        except AIError as exc:
+            self.test_result.setText(f"✗ {exc}")
+        except Exception as exc:  # noqa: BLE001
+            self.test_result.setText(f"✗ {type(exc).__name__} : {exc}")
+        finally:
+            self.test_btn.setEnabled(True)
 
 
 class TableDialog(QDialog):

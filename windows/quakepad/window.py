@@ -22,9 +22,10 @@ from .editor import IMAGE_EXTS, Document, format_for_path
 from .findbar import FindBar
 from .icons import icon
 from .settings import APP_NAME, APP_VERSION, Settings, app_dir
+from .ai import AICorrector, apply_corrections, collect_blocks
 from .spell import SpellChecker, document_text
 from .textio import ENCODINGS, EOLS
-from .theme import palette, stylesheet
+from .theme import palette, qpalette, stylesheet
 
 OPEN_FILTER = ("Textes et notes (*.txt *.md *.html *.htm *.log *.ini *.cfg *.conf *.json *.yaml *.yml "
                "*.ps1 *.py *.sh *.csv *.xml);;Tous les fichiers (*)")
@@ -170,6 +171,11 @@ class QuakeWindow(QWidget):
         self.find_bar = FindBar(self.current, self)
         self.find_bar.hide()
         self.find_bar.closed.connect(lambda: self.current() and self.current().setFocus())
+
+        self.ai = AICorrector(self)
+        self.ai.finished.connect(self._ai_done)
+        self.ai.failed.connect(self._ai_failed)
+        self._ai_busy = False
 
         self.spell = SpellChecker(self)
         self.spell.finished.connect(self._spell_done)
@@ -325,7 +331,9 @@ class QuakeWindow(QWidget):
         e.addAction(A("edit.date", "Insérer date/heure", self.insert_datetime, "F5"))
         e.addAction(A("edit.dupline", "Dupliquer la ligne", self.duplicate_line, "Ctrl+D"))
         e.addSeparator()
-        e.addAction(A("spell.check", "Corriger l'orthographe et la grammaire", self.check_spelling, "F7",
+        e.addAction(A("spell.ai", "Corriger automatiquement avec l'IA", self.ai_correct, "Ctrl+F7",
+                      icon_name="ai"))
+        e.addAction(A("spell.check", "Vérifier mot par mot (LanguageTool)", self.check_spelling, "F7",
                       icon_name="spell"))
         e.addAction(A("spell.next", "Faute suivante", self.next_issue, "F8", icon_name="next_error"))
 
@@ -440,6 +448,7 @@ class QuakeWindow(QWidget):
         tb.addAction(self.act_image)
         tb.addAction(self.act_clear)
         tb.addSeparator()
+        tb.addAction(self._actions["spell.ai"][0])
         tb.addAction(self._actions["spell.check"][0])
         tb.addAction(self._actions["spell.next"][0])
         spacer = QWidget()
@@ -486,7 +495,9 @@ class QuakeWindow(QWidget):
         self._update_status()
 
     def apply_theme(self) -> None:
-        self.setStyleSheet(stylesheet(self.settings["theme"], self.assets_dir))
+        app = QApplication.instance()
+        app.setPalette(qpalette(self.settings["theme"]))
+        app.setStyleSheet(stylesheet(self.settings["theme"], self.assets_dir))
         pal = palette(self.settings["theme"])
         for obj, name in self._icon_actions:
             obj.setIcon(icon(name, pal["muted"]))
@@ -549,9 +560,10 @@ class QuakeWindow(QWidget):
         doc.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth if self.settings["word_wrap"]
                             else QTextEdit.LineWrapMode.NoWrap)
 
-    def open_settings(self) -> None:
+    def open_settings(self, tab: int = 0) -> None:
         self.hotkey.unregister()  # sinon la capture déclencherait le raccourci
         dlg = SettingsDialog(self.settings, self.shortcut_table(), self)
+        dlg.tabs.setCurrentIndex(tab)
         dlg.setStyleSheet(stylesheet(self.settings["theme"], self.assets_dir))
         if dlg.exec():
             vals = dlg.values()
@@ -919,7 +931,6 @@ class QuakeWindow(QWidget):
         if not doc:
             return
         dlg = TableDialog(self)
-        dlg.setStyleSheet(self.styleSheet())
         if dlg.exec():
             doc.insert_table(dlg.rows.value(), dlg.cols.value())
             doc.setFocus()
@@ -977,6 +988,61 @@ class QuakeWindow(QWidget):
         self._info("Correction indisponible.")
         QMessageBox.warning(self, APP_NAME, f"La correction n'a pas pu être effectuée :\n{msg}\n\n"
                             f"Serveur : {self.settings['spell_server']}")
+
+    # --- Correction automatique par IA ------------------------------------
+    def ai_correct(self) -> None:
+        doc = self.current()
+        if not doc or self._ai_busy:
+            return
+        cfg = self.settings
+        if cfg["ai_provider"] == "anthropic" and not cfg["anthropic_key"]:
+            QMessageBox.information(self, APP_NAME, "Configurez d'abord l'IA : clé API Anthropic, "
+                                    "ou une IA locale (Ollama) dans l'onglet Correction.")
+            self.open_settings(tab=3)
+            return
+        selection = doc.textCursor().hasSelection()
+        blocks = collect_blocks(doc, selection_only=selection)
+        if not blocks:
+            self._info("Rien à corriger.")
+            return
+        self._ai_busy = True
+        doc._ai_snapshot = [t for _, t in blocks]
+        doc.setReadOnly(True)  # évite tout décalage pendant la requête
+        for aid in ("spell.ai",):
+            self._actions[aid][0].setEnabled(False)
+        what = "la sélection" if selection else "la note"
+        model = cfg["anthropic_model"] if cfg["ai_provider"] == "anthropic" else cfg["openai_model"]
+        self._info(f"✦ Correction de {what} par IA ({model})…", keep=True)
+        self.ai.correct(doc, blocks, dict(cfg))
+
+    def _ai_finish(self, doc: Document) -> None:
+        self._ai_busy = False
+        self._actions["spell.ai"][0].setEnabled(True)
+        if doc in self.docs():
+            doc.setReadOnly(False)
+
+    def _ai_done(self, doc: Document, blocks: list, corrected: list) -> None:
+        self._ai_finish(doc)
+        if doc not in self.docs():
+            return
+        doc._applying_ai = True
+        try:
+            paras, edits, spans = apply_corrections(doc, blocks, corrected)
+        finally:
+            doc._applying_ai = False
+        doc.issues = []  # les soulignements LanguageTool ne correspondent plus
+        if edits:
+            doc.flash_ranges(spans)
+            self._info(f"✦ {edits} correction(s) dans {paras} paragraphe(s) — surlignées en vert, "
+                       "Ctrl+Z pour tout annuler.")
+        else:
+            doc._paint_issues()
+            self._info("✦ Aucune faute trouvée par l'IA.")
+
+    def _ai_failed(self, doc: Document, msg: str) -> None:
+        self._ai_finish(doc)
+        self._info("Correction IA impossible.")
+        QMessageBox.warning(self, APP_NAME, f"La correction par IA a échoué :\n{msg}")
 
     def next_issue(self) -> None:
         doc = self.current()

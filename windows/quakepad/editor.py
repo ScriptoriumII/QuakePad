@@ -72,6 +72,7 @@ class Document(QTextEdit):
         self.untitled_name = untitled_name
         self.rich = False  # contient mise en forme / images / tableaux
         self.issues: list[SpellIssue] = []
+        self._flash: list[tuple[int, int]] = []
         self.setAcceptRichText(True)
         self.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self.setAcceptDrops(True)
@@ -364,8 +365,32 @@ class Document(QTextEdit):
         self.issues = issues
         self._paint_issues()
 
+    def flash_ranges(self, spans: list[tuple[int, int]], ms: int = 8000) -> None:
+        """Surligne en vert les passages corrigés (jusqu'à la prochaine frappe ou {ms} ms)."""
+        from PySide6.QtCore import QTimer
+
+        self._flash = spans
+        self._paint_issues()
+        QTimer.singleShot(ms, self._clear_flash)
+
+    def _clear_flash(self) -> None:
+        if self._flash:
+            self._flash = []
+            self._paint_issues()
+
     def _paint_issues(self) -> None:
         sels = []
+        n = self.document().characterCount() - 1
+        for a, z in self._flash:
+            sel = QTextEdit.ExtraSelection()
+            c = QTextCursor(self.document())
+            c.setPosition(min(a, n))
+            c.setPosition(min(z, n), QTextCursor.MoveMode.KeepAnchor)
+            sel.cursor = c
+            f = QTextCharFormat()
+            f.setBackground(QColor(46, 160, 67, 70))
+            sel.format = f
+            sels.append(sel)
         for it in self.issues:
             sel = QTextEdit.ExtraSelection()
             c = QTextCursor(self.document())
@@ -380,6 +405,9 @@ class Document(QTextEdit):
         self.setExtraSelections(sels)
 
     def _shift_issues(self, pos: int, removed: int, added: int) -> None:
+        if self._flash and not getattr(self, "_applying_ai", False):
+            self._flash = []
+            self._paint_issues()
         if not self.issues:
             return
         delta = added - removed

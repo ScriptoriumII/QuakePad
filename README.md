@@ -23,7 +23,8 @@ Les notes **ne sont pas synchronisées** entre les deux.
 - **Onglets** avec un onglet **« + »** accolé pour créer une note d'un clic ; session restaurée (même non enregistrée, images comprises).
 - **Barre de mise en forme** : taille du texte (A−, liste, A+), gras, italique, souligné, barré, couleur, listes, **tableau** (et ajout/suppression de lignes/colonnes), **image**, effacer la mise en forme.
 - **Photos** : bouton image, copier-coller (capture d'écran comprise) ou glisser-déposer ; redimensionnables au clic droit (25/50/75/100 %). Elles sont intégrées au document.
-- **Correction orthographe et grammaire** (icône A✓ ou F7) via LanguageTool : fautes soulignées, suggestions au clic droit, F8 = faute suivante.
+- **Correction automatique par IA** (icône ✦ ou Ctrl+F7) : l'IA corrige orthographe, grammaire, accords et ponctuation **sans reformuler**, en conservant gras, tailles, images et tableaux. Passages corrigés surlignés en vert, **Ctrl+Z annule tout**. Avec une sélection, seule la sélection est corrigée. Au choix : **Claude** (API Anthropic, modèle `claude-haiku-5-5` par défaut) ou une **IA compatible OpenAI** (Ollama en local, LM Studio, Mistral…).
+- **Vérification mot par mot** (icône A✓ ou F7) via LanguageTool : fautes soulignées, suggestions au clic droit, F8 = faute suivante.
 - **Export PDF** (A4) et impression.
 - Formats : `.txt` (encodage et fins de ligne conservés), `.html` (mise en forme + images), `.md` ; ouverture et enregistrement dans **n'importe quel dossier**.
 - **Raccourcis clavier personnalisables** (☰ → Paramètres → Raccourcis).
@@ -32,7 +33,15 @@ Les notes **ne sont pas synchronisées** entre les deux.
 
 > ℹ️ Un fichier `.txt` reste du texte brut : le collage s'y fait sans mise en forme, et si vous ajoutez des images ou du gras, QuakePad propose d'enregistrer en `.html` pour ne rien perdre.
 
-### Correction orthographique : confidentialité
+### Correction par IA : configuration
+☰ → Paramètres → **Correction** :
+- **Claude** : créez une clé sur [console.anthropic.com](https://console.anthropic.com) (paiement à l'usage ; une note courante coûte une fraction de centime avec `claude-haiku-5-5`). La clé est **chiffrée avec votre compte Windows (DPAPI)** dans `settings.json`.
+- **IA locale (rien ne quitte le PC)** : installez [Ollama](https://ollama.com), puis `ollama pull mistral-nemo` ; adresse `http://localhost:11434/v1`, modèle `mistral-nemo`.
+- Bouton **Tester la connexion** pour valider.
+
+Garde-fous : un paragraphe trop réécrit (moins de 60 % de similarité) ou dont l'IA change le nombre d'images est ignoré ; si l'IA renvoie un nombre de paragraphes différent, rien n'est modifié.
+
+### Correction LanguageTool : confidentialité
 Le texte de la note est envoyé au serveur LanguageTool configuré. Par défaut, c'est le serveur public `api.languagetool.org` (gratuit, 20 requêtes/min). Pour garder les notes en interne :
 ```bash
 docker run -d -p 8010:8010 erikvl87/languagetool
@@ -51,7 +60,7 @@ puis ☰ → Paramètres → Correction → `http://serveur:8010/v2/check`.
 | Listes à puces / numérotée | Ctrl+Maj+L / Ctrl+Maj+O |
 | Tableau / image | Ctrl+Alt+T / Ctrl+Maj+I |
 | Effacer la mise en forme / coller sans mise en forme | Ctrl+Espace / Ctrl+Maj+V |
-| Correction / faute suivante | F7 / F8 |
+| Correction IA / LanguageTool / faute suivante | Ctrl+F7 / F7 / F8 |
 | Rechercher / remplacer / suivant / précédent | Ctrl+F / Ctrl+H / F3 / Maj+F3 |
 | Atteindre la ligne / date et heure / dupliquer la ligne | Ctrl+G / F5 / Ctrl+D |
 | Onglet suivant / précédent / n° | Ctrl+Tab / Ctrl+Maj+Tab / Alt+1…9 |

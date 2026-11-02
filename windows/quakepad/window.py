@@ -1168,7 +1168,8 @@ class QuakeWindow(QWidget):
         what = "la sélection" if selection else "la note"
         model = ep["model"]
         self._info(f"✦ Correction de {what} par IA ({model})…", keep=True)
-        self.ai.correct(doc, blocks, dict(cfg))
+        self._ai_cfg = dict(cfg)
+        self.ai.correct(doc, blocks, self._ai_cfg)
 
     def _ai_finish(self, doc: Document) -> None:
         self._ai_busy = False
@@ -1186,9 +1187,11 @@ class QuakeWindow(QWidget):
         finally:
             doc._applying_ai = False
         doc.issues = []  # les soulignements LanguageTool ne correspondent plus
+        used = getattr(self, "_ai_cfg", {}).get("_model_used")
+        via = f" (via {used}, modèle habituel surchargé)" if used and used != resolve_ai(self.settings)["model"] else ""
         if edits:
             doc.flash_ranges(spans)
-            self._info(f"✦ {edits} correction(s) dans {paras} paragraphe(s) — surlignées en vert, "
+            self._info(f"✦ {edits} correction(s) dans {paras} paragraphe(s){via} — surlignées en vert, "
                        "Ctrl+Z pour tout annuler.")
         else:
             doc._paint_issues()

@@ -113,10 +113,43 @@ Réponds UNIQUEMENT avec un tableau JSON de chaînes, de même longueur et dans 
 
 
 class AIError(Exception):
-    pass
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
-def _post_json(url: str, payload: dict, headers: dict, timeout: int = 120) -> dict:
+TRANSIENT = (429, 500, 502, 503, 504)  # erreurs temporaires côté service
+
+
+def _error_message(detail: str) -> str:
+    """Extrait le message lisible d'une réponse d'erreur JSON (dict ou liste)."""
+    try:
+        data = json.loads(detail)
+    except ValueError:
+        return detail.strip()[:200]
+    if isinstance(data, list) and data:
+        data = data[0]
+    err = data.get("error", data) if isinstance(data, dict) else data
+    if isinstance(err, dict):
+        return str(err.get("message") or err.get("status") or err)[:300]
+    return str(err)[:300]
+
+
+def _post_json(url: str, payload: dict, headers: dict, timeout: int = 120, retries: int = 2) -> dict:
+    """POST JSON avec nouvelles tentatives (1,5 s puis 4 s) sur les erreurs temporaires 429/5xx."""
+    import time
+
+    for attempt in range(retries + 1):
+        try:
+            return _post_json_once(url, payload, headers, timeout)
+        except AIError as exc:
+            if exc.status not in TRANSIENT or attempt == retries:
+                raise
+            time.sleep((1.5, 4.0, 8.0)[min(attempt, 2)])
+    raise AIError("Échec inattendu.")
+
+
+def _post_json_once(url: str, payload: dict, headers: dict, timeout: int) -> dict:
     import socket
     req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
                                  headers={"content-type": "application/json", **headers})
@@ -132,16 +165,21 @@ def _post_json(url: str, payload: dict, headers: dict, timeout: int = 120) -> di
                         "de l'API. Choisissez le fournisseur dédié dans la liste, ou corrigez l'adresse.")
             raise AIError("Le serveur n'a pas renvoyé de réponse d'API (JSON)." + hint) from None
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")[:300]
-        if exc.code in (401, 403):
-            raise AIError("Clé API refusée (401/403). Vérifiez-la dans Paramètres → Correction.") from exc
-        if exc.code == 429:
-            raise AIError("Limite de requêtes atteinte (429). Réessayez dans un instant.") from exc
-        if exc.code == 404:
-            raise AIError(f"Modèle ou adresse introuvable (404) : vérifiez le nom du modèle. {detail}") from exc
-        if exc.code == 400 and "API key" in detail:
-            raise AIError("Clé API invalide pour ce fournisseur. Vérifiez-la dans Paramètres → Correction.") from exc
-        raise AIError(f"Erreur HTTP {exc.code} : {detail}") from exc
+        raw = exc.read().decode("utf-8", "replace")
+        detail = _error_message(raw)
+        code = exc.code
+        if code in (401, 403):
+            raise AIError("Clé API refusée (401/403). Vérifiez-la dans Paramètres → Correction.", code) from exc
+        if code == 429:
+            raise AIError("Quota gratuit ou limite de requêtes atteint (429). Patientez une minute, "
+                          "ou essayez un autre modèle.", code) from exc
+        if code in (500, 502, 503, 504):
+            raise AIError(f"Le service IA est momentanément surchargé ou indisponible ({code}) : « {detail} »", code) from exc
+        if code == 404:
+            raise AIError(f"Modèle ou adresse introuvable (404) : vérifiez le nom du modèle. {detail}", code) from exc
+        if code == 400 and "API key" in raw:
+            raise AIError("Clé API invalide pour ce fournisseur. Vérifiez-la dans Paramètres → Correction.", code) from exc
+        raise AIError(f"Erreur HTTP {code} : {detail}", code) from exc
     except urllib.error.URLError as exc:
         if isinstance(exc.reason, (TimeoutError, socket.timeout)):
             raise AIError(f"Le service IA n'a pas répondu en {timeout} s. Réessayez, ou choisissez un modèle plus "
@@ -153,7 +191,28 @@ def _post_json(url: str, payload: dict, headers: dict, timeout: int = 120) -> di
 
 
 def _call(cfg: dict, user_text: str, timeout: int | None = None) -> str:
+    """Appelle le modèle choisi ; s'il reste surchargé (503/429…), bascule sur un autre modèle du fournisseur."""
     ep = resolve(cfg)
+    candidates = [ep["model"]] + [m for m in ep["meta"].get("models", []) if m != ep["model"]]
+    if ep["id"] in ("openai", "ollama"):
+        candidates = candidates[:1]  # modèles locaux / personnalisés : pas de bascule implicite
+    last: AIError | None = None
+    for model in candidates[:3]:
+        try:
+            text = _call_model(cfg, user_text, timeout, model)
+            cfg["_model_used"] = model
+            return text
+        except AIError as exc:
+            if exc.status not in TRANSIENT:
+                raise
+            last = exc
+    tried = ", ".join(candidates[:3])
+    raise AIError(f"{last} — modèles essayés : {tried}. Réessayez dans quelques minutes.", last.status if last else None)
+
+
+def _call_model(cfg: dict, user_text: str, timeout: int | None, model: str) -> str:
+    ep = resolve(cfg)
+    ep["model"] = model
     if timeout is None:
         timeout = 300 if ep["id"] == "ollama" else 120
     if ep["kind"] == "anthropic":
@@ -233,7 +292,10 @@ TEST_TIMEOUT = 45
 
 def test_connection(cfg: dict) -> str:
     result = correct_paragraphs(["Je suis aller a la plage hier, il faisait tres beaux."], cfg, TEST_TIMEOUT)
-    return result[0]
+    used = cfg.get("_model_used")
+    chosen = resolve(cfg)["model"]
+    suffix = f" [via {used}, {chosen} étant surchargé]" if used and used != chosen else ""
+    return result[0] + suffix
 
 
 # ---------------------------------------------------------------------------

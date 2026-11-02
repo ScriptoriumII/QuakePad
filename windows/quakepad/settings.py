@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "QuakePad"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 
 # Scan code 0x29 = touche située sous Échap (« ² » en AZERTY, « ` » en QWERTY),
 # la même que celle utilisée par le mode Quake de Windows Terminal.

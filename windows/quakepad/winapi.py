@@ -28,6 +28,9 @@ if IS_WINDOWS:
     user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
     user32.SetForegroundWindow.argtypes = [wintypes.HWND]
     user32.BringWindowToTop.argtypes = [wintypes.HWND]
+    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                    ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    user32.SetWindowPos.restype = wintypes.BOOL
 
 WM_HOTKEY = 0x0312
 MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x1, 0x2, 0x4, 0x8, 0x4000
@@ -126,6 +129,19 @@ def force_foreground(hwnd: int) -> None:
     user32.SetForegroundWindow(hwnd)
     if attached:
         user32.AttachThreadInput(fg_tid, cur_tid, False)
+
+
+HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x1, 0x2, 0x10
+
+
+def set_topmost(hwnd: int, on: bool, activate: bool = False) -> None:
+    """Active/désactive « toujours au premier plan » (SetWindowPos)."""
+    if not IS_WINDOWS or not hwnd:
+        return
+    flags = SWP_NOSIZE | SWP_NOMOVE | (0 if activate else SWP_NOACTIVATE)
+    user32.SetWindowPos(wintypes.HWND(hwnd), wintypes.HWND(HWND_TOPMOST if on else HWND_NOTOPMOST),
+                        0, 0, 0, 0, flags)
 
 
 def set_app_user_model_id(app_id: str) -> None:

@@ -39,7 +39,7 @@ def stylesheet(name: str, assets: str = "") -> str:
     close_hover = f"{assets}/close-{theme}-hover.svg".replace("\\", "/")
     return f"""
 #QuakeRoot {{ background: {p['bg']}; }}
-QWidget {{ color: {p['fg']}; font-size: 10pt; }}
+QWidget {{ color: {p['fg']}; }}
 QTextEdit {{
     background: {p['bg']}; color: {p['fg']}; border: none;
     selection-background-color: {p['selection']}; selection-color: {p['fg']};

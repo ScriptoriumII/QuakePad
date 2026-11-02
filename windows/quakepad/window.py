@@ -5,13 +5,13 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QMarginsF, QPropertyAnimation, QRect, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QEasingCurve, QMarginsF, QPropertyAnimation, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import (
     QAction, QColor, QCursor, QFont, QGuiApplication, QIcon, QKeySequence, QPageLayout,
     QPageSize, QPainter, QTextListFormat,
 )
 from PySide6.QtWidgets import (
-    QApplication, QColorDialog, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QInputDialog,
+    QApplication, QColorDialog, QComboBox, QDialog, QFileDialog, QGridLayout, QHBoxLayout, QInputDialog,
     QLabel, QLayout, QMenu, QMessageBox, QSizePolicy, QSystemTrayIcon, QTabBar, QTabWidget, QTextEdit,
     QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
@@ -94,6 +94,23 @@ class EdgeHandle(QWidget):
         if self._start is not None:
             self._start = None
             self._win.end_resize()
+
+
+class _DialogWatcher(QObject):
+    """Place chaque boîte de dialogue au-dessus de QuakePad (fenêtre « toujours au premier plan »)."""
+
+    def __init__(self, window: "QuakeWindow"):
+        super().__init__(window)
+        self._win = window
+
+    def eventFilter(self, obj, ev):  # noqa: N802
+        if isinstance(obj, QDialog) and obj.isWindow():
+            t = ev.type()
+            if t == QEvent.Type.Show:
+                self._win.dialog_opened(obj)
+            elif t in (QEvent.Type.Hide, QEvent.Type.Close):
+                QTimer.singleShot(0, self._win.dialog_closed)
+        return False
 
 
 class QuakeWindow(QWidget):
@@ -217,6 +234,9 @@ class QuakeWindow(QWidget):
         self.hotkey = winapi.GlobalHotkey(self)
         self.hotkey.activated.connect(self.toggle)
         QGuiApplication.instance().applicationStateChanged.connect(self._on_app_state)
+        self._dialog_watcher = _DialogWatcher(self)
+        QApplication.instance().installEventFilter(self._dialog_watcher)
+        self._native_dialog_depth = 0
         try:
             QGuiApplication.styleHints().colorSchemeChanged.connect(lambda _s: self._on_system_theme())
         except AttributeError:
@@ -693,6 +713,44 @@ class QuakeWindow(QWidget):
 
         self._animate(g, self._hidden_geometry(g), done)
 
+    # --- Dialogues au premier plan ------------------------------------------
+    def dialog_opened(self, dlg: QDialog) -> None:
+        winapi.set_topmost(int(self.winId()), False)
+        dlg.finished.connect(lambda _r: QTimer.singleShot(0, self.dialog_closed))
+
+        def lift():
+            winapi.set_topmost(int(dlg.winId()), True, activate=True)
+            dlg.raise_()
+            dlg.activateWindow()
+
+        QTimer.singleShot(0, lift)
+
+    def dialog_closed(self) -> None:
+        """Rétablit « toujours au premier plan » quand plus aucun dialogue n'est ouvert."""
+        if self._native_dialog_depth:
+            return
+        if any(isinstance(w, QDialog) and w.isVisible() for w in QApplication.topLevelWidgets()):
+            return
+        winapi.set_topmost(int(self.winId()), True)
+
+    def native_dialog(self):
+        """Contexte pour les dialogues natifs de Windows (Ouvrir, Enregistrer, Imprimer)."""
+        window = self
+
+        class _Ctx:
+            def __enter__(self_):
+                window._native_dialog_depth += 1
+                winapi.set_topmost(int(window.winId()), False)
+
+            def __exit__(self_, *exc):
+                window._native_dialog_depth -= 1
+                if window._native_dialog_depth == 0:
+                    winapi.set_topmost(int(window.winId()), True)
+                    window._activate()
+                return False
+
+        return _Ctx()
+
     def _activate(self) -> None:
         self.raise_()
         self.activateWindow()
@@ -875,8 +933,9 @@ class QuakeWindow(QWidget):
         doc = self.current()
         if not doc:
             return
-        files, _ = QFileDialog.getOpenFileNames(self, "Insérer une image", str(Path.home() / "Pictures"),
-                                                IMAGE_FILTER)
+        with self.native_dialog():
+            files, _ = QFileDialog.getOpenFileNames(self, "Insérer une image", str(Path.home() / "Pictures"),
+                                                    IMAGE_FILTER)
         for f in files:
             if not doc.insert_image_file(f):
                 QMessageBox.warning(self, APP_NAME, f"Image illisible :\n{f}")
@@ -930,7 +989,8 @@ class QuakeWindow(QWidget):
     def open_dialog(self) -> None:
         cur = self.current()
         start = str(Path(cur.path).parent) if cur and cur.path else str(Path.home() / "Documents")
-        files, _ = QFileDialog.getOpenFileNames(self, "Ouvrir", start, OPEN_FILTER)
+        with self.native_dialog():
+            files, _ = QFileDialog.getOpenFileNames(self, "Ouvrir", start, OPEN_FILTER)
         self.open_files(files)
 
     def open_files(self, files: list[str]) -> None:
@@ -963,8 +1023,9 @@ class QuakeWindow(QWidget):
         folder = Path(doc.path).parent if doc.path else Path.home() / "Documents"
         suggested = str(folder / f"{base}.{'html' if fmt == 'html' else fmt}")
         filters = ";;".join(list(SAVE_FILTERS.values()) + ["Tous les fichiers (*)"])
-        path, chosen = QFileDialog.getSaveFileName(self, "Enregistrer sous", suggested, filters,
-                                                   SAVE_FILTERS.get(fmt, ""))
+        with self.native_dialog():
+            path, chosen = QFileDialog.getSaveFileName(self, "Enregistrer sous", suggested, filters,
+                                                       SAVE_FILTERS.get(fmt, ""))
         if not path:
             return None
         if not Path(path).suffix:
@@ -1020,8 +1081,9 @@ class QuakeWindow(QWidget):
         if path is None:
             base = Path(doc.path).stem if doc.path else doc.title()
             folder = Path(doc.path).parent if doc.path else Path.home() / "Documents"
-            path, _ = QFileDialog.getSaveFileName(self, "Exporter en PDF", str(folder / f"{base}.pdf"),
-                                                  "PDF (*.pdf)")
+            with self.native_dialog():
+                path, _ = QFileDialog.getSaveFileName(self, "Exporter en PDF", str(folder / f"{base}.pdf"),
+                                                      "PDF (*.pdf)")
             if not path:
                 return False
             if not path.lower().endswith(".pdf"):
@@ -1060,7 +1122,9 @@ class QuakeWindow(QWidget):
 
         printer = QPrinter()
         dlg = QPrintDialog(printer, self)
-        if dlg.exec():
+        with self.native_dialog():
+            accepted = dlg.exec()
+        if accepted:
             doc.document().print_(printer)
 
     # ================================================================
@@ -1195,11 +1259,18 @@ class QuakeWindow(QWidget):
         )
 
     def quit_app(self) -> None:
+        self._quitting = True
+        QApplication.instance().removeEventFilter(self._dialog_watcher)
         self.save_session()
         self.hotkey.unregister()
         self.tray.hide()
-        QApplication.instance().quit()
+        # exit() et non quit() : sous Qt 6, quit() demande d'abord aux fenêtres de se fermer,
+        # et notre closeEvent (Alt+F4 = masquer) annulerait la sortie.
+        QApplication.instance().exit(0)
 
     def closeEvent(self, e):  # noqa: N802  (Alt+F4 masque au lieu de quitter)
+        if getattr(self, "_quitting", False):
+            e.accept()
+            return
         e.ignore()
         self.hide_animated()

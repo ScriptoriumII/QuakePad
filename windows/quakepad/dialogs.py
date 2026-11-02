@@ -332,8 +332,9 @@ class SettingsDialog(QDialog):
             for _label, w in rows:
                 self._ai_form.setRowVisible(w, visible)
         self.ai_note.setText(
-            "<small>Le texte est envoyé à Anthropic. <code>claude-haiku-5-5</code> : rapide et économique "
-            "(une note courante coûte une fraction de centime). Clé chiffrée avec votre compte Windows (DPAPI).</small>"
+            "<small>Le texte est envoyé à Anthropic. <code>claude-haiku-5-5</code> : rapide et économique. "
+            "<code>claude-sonnet-5-5</code> : plus précis sur les phrases très fautives (environ 20× plus cher, "
+            "reste de l'ordre du centime par note). Clé chiffrée avec votre compte Windows (DPAPI).</small>"
             if anthropic else
             "<small>Pour une IA 100 % locale : installez Ollama puis <code>ollama pull mistral-nemo</code>. "
             "Rien ne quitte le PC. La qualité dépend du modèle choisi.</small>")

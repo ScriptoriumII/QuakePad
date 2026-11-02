@@ -36,7 +36,8 @@ def check_text(text: str, server: str, language: str) -> list[SpellIssue]:
     for offset, chunk in _chunks(text):
         if not chunk.strip():
             continue
-        params = {"text": chunk, "language": language or "auto"}
+        # level=picky active les règles supplémentaires (style, typographie, grammaire avancée)
+        params = {"text": chunk, "language": language or "auto", "level": "picky"}
         if params["language"] == "auto":
             params["preferredVariants"] = "fr-FR,en-US"
         data = urllib.parse.urlencode(params).encode()

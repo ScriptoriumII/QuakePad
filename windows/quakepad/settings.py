@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "QuakePad"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 SECRET_KEYS = ("anthropic_key", "openai_key")
 
 # Scan code 0x29 = touche située sous Échap (« ² » en AZERTY, « ` » en QWERTY),

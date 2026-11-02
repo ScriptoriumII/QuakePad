@@ -76,7 +76,7 @@ class Document(QTextEdit):
         self.setAcceptRichText(True)
         self.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self.setAcceptDrops(True)
-        self.document().setDocumentMargin(10)
+        self.document().setDocumentMargin(18)
         self.document().contentsChange.connect(self._shift_issues)
 
     # --- Identité -------------------------------------------------------

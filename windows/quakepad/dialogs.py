@@ -119,6 +119,7 @@ class SettingsDialog(QDialog):
         self._sizes = copy.deepcopy(s["sizes"])
 
         tabs = QTabWidget()
+        tabs.setObjectName("SettingsTabs")
 
         # --- Général ---------------------------------------------------------
         self.hotkey = HotkeyEdit(s["hotkey"])

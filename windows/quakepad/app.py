@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QGuiApplication, QIcon
+from PySide6.QtGui import QFont, QFontInfo, QGuiApplication, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
@@ -54,6 +54,11 @@ def main() -> int:
     # Le style natif Windows 11 dessine lui-même le fond des menus (sombre/translucide) et ignore
     # les couleurs du thème : Fusion applique le thème QuakePad partout de façon cohérente.
     app.setStyle("Fusion")
+    ui_font = QFont("Segoe UI Variable Text")
+    if not QFontInfo(ui_font).exactMatch():
+        ui_font = QFont("Segoe UI")
+    ui_font.setPointSizeF(9.5)
+    app.setFont(ui_font)
 
     # Menus standards de Qt (clic droit : Copier, Coller…) en français
     from PySide6.QtCore import QLibraryInfo, QLocale, QTranslator

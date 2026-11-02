@@ -11,7 +11,7 @@ from PySide6.QtGui import (
     QPageSize, QPainter, QTextListFormat,
 )
 from PySide6.QtWidgets import (
-    QApplication, QColorDialog, QComboBox, QDialog, QFileDialog, QGridLayout, QHBoxLayout, QInputDialog,
+    QApplication, QColorDialog, QDialog, QFileDialog, QGridLayout, QHBoxLayout, QInputDialog,
     QLabel, QLayout, QMenu, QMessageBox, QSizePolicy, QSystemTrayIcon, QTabBar, QTabWidget, QTextEdit,
     QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
@@ -171,6 +171,10 @@ class QuakeWindow(QWidget):
         self.hide_btn = QToolButton(toolTip="Masquer (Échap)")
         self.hide_btn.clicked.connect(self.hide_animated)
         for b, name in ((self.pin_btn, "pin"), (self.menu_btn, "menu"), (self.hide_btn, "hide")):
+            b.setObjectName("ChromeBtn")
+            b.setAutoRaise(True)
+            b.setIconSize(QSize(18, 18))
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             cl.addWidget(b)
             self._icon_actions.append((b, name))
         self.tabs.setCornerWidget(corner, Qt.Corner.TopRightCorner)
@@ -192,9 +196,11 @@ class QuakeWindow(QWidget):
         self.status = QWidget()
         self.status.setObjectName("StatusBar")
         sl = QHBoxLayout(self.status)
-        sl.setContentsMargins(8, 3, 8, 3)
+        sl.setContentsMargins(10, 4, 10, 4)
+        sl.setSpacing(2)
         self.lbl_path = QLabel()
         self.lbl_info = QLabel()
+        self.lbl_info.setObjectName("InfoLabel")
         self.lbl_pos = QLabel()
         self.lbl_len = QLabel()
         self.lbl_zoom = QLabel()
@@ -234,9 +240,9 @@ class QuakeWindow(QWidget):
         # La taille est pilotée par les pourcentages, pas par le contenu (positions gauche/droite étroites).
         grid.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         self.setMinimumSize(200, 120)
-        for lbl in (self.lbl_path, self.lbl_info):
-            lbl.setMinimumWidth(0)
-            lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.lbl_path.setMinimumWidth(0)
+        self.lbl_path.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.lbl_info.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         grid.setColumnStretch(1, 1)
 
         self._build_tray()
@@ -425,15 +431,19 @@ class QuakeWindow(QWidget):
         tb.setObjectName("FormatBar")
         tb.setMovable(False)
         tb.setFloatable(False)
-        tb.setIconSize(QSize(18, 18))
+        tb.setIconSize(QSize(20, 20))
         tb.addAction(self.act_size_down)
-        self.size_box = QComboBox(editable=True)
-        self.size_box.setToolTip("Taille du texte")
-        self.size_box.addItems([str(s) for s in FONT_SIZES])
-        self.size_box.setFixedWidth(64)
-        self.size_box.activated.connect(lambda _i: self._apply_size_box())
-        self.size_box.lineEdit().returnPressed.connect(self._apply_size_box)
-        tb.addWidget(self.size_box)
+        self.size_btn = QToolButton(text="11", toolTip="Taille du texte")
+        self.size_btn.setObjectName("SizeBtn")
+        self.size_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.size_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        size_menu = QMenu(self.size_btn)
+        for sz in FONT_SIZES:
+            size_menu.addAction(f"{sz} pt", lambda v=sz: self._doc_call("set_point_size", float(v)))
+        size_menu.addSeparator()
+        size_menu.addAction("Autre taille…", self._custom_size)
+        self.size_btn.setMenu(size_menu)
+        tb.addWidget(self.size_btn)
         tb.addAction(self.act_size_up)
         tb.addSeparator()
         tb.addActions([self.act_bold, self.act_italic, self.act_underline, self.act_strike, self.act_color])
@@ -507,13 +517,18 @@ class QuakeWindow(QWidget):
         app.setStyleSheet(stylesheet(self.settings["theme"], self.assets_dir))
         pal = palette(self.settings["theme"])
         accent = pal["accent"]
-        self.new_tab_btn.setIcon(icon("plus", accent, 16))
+        self.new_tab_btn.setIcon(icon("plus", accent, 16, stroke=2.2))
         for i in range(self.tabs.count()):
             btn = self.tabs.tabBar().tabButton(i, QTabBar.ButtonPosition.RightSide)
             if isinstance(btn, QToolButton) and btn.objectName() == "TabClose":
-                btn.setIcon(icon("close", pal["muted"], 14))
+                btn.setIcon(icon("close", pal["muted"], 14, stroke=2))
         for obj, name in self._icon_actions:
-            obj.setIcon(icon(name, pal["muted"]))
+            if name == "color":
+                obj.setIcon(icon(name, pal["icon"], underline_color=accent))
+            elif name == "ai":
+                obj.setIcon(icon(name, accent))  # l'action IA ressort en couleur d'accent
+            else:
+                obj.setIcon(icon(name, pal["icon"]))
         for h in getattr(self, "handles", {}).values():
             h.update()
 
@@ -838,7 +853,9 @@ class QuakeWindow(QWidget):
         idx = self.tabs.insertTab(self.tabs.indexOf(self._plus), doc, doc.title())
         close = QToolButton(toolTip="Fermer l'onglet (Ctrl+W)")
         close.setObjectName("TabClose")
-        close.setIcon(icon("close", palette(self.settings["theme"])["muted"], 14))
+        close.setIcon(icon("close", palette(self.settings["theme"])["muted"], 14, stroke=2))
+        close.setIconSize(QSize(14, 14))
+        close.setAutoRaise(True)
         close.setCursor(Qt.CursorShape.PointingHandCursor)
         close.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         close.clicked.connect(lambda _=False, d=doc: self.close_tab(self.tabs.indexOf(d)))
@@ -932,14 +949,15 @@ class QuakeWindow(QWidget):
         self.act_underline.setChecked(f.fontUnderline())
         self.act_strike.setChecked(f.fontStrikeOut())
         size = doc.current_point_size()
-        self.size_box.setEditText(f"{size:g}")
+        self.size_btn.setText(f"{size:g} ▾")
 
-    def _apply_size_box(self) -> None:
-        try:
-            size = float(self.size_box.currentText().replace(",", "."))
-        except ValueError:
+    def _custom_size(self) -> None:
+        doc = self.current()
+        if not doc:
             return
-        self._doc_call("set_point_size", size)
+        size, ok = QInputDialog.getDouble(self, "Taille du texte", "Taille (pt) :", doc.current_point_size(), 4, 144, 1)
+        if ok:
+            self._doc_call("set_point_size", size)
 
     def pick_color(self) -> None:
         doc = self.current()

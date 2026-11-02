@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "QuakePad"
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.3.0"
 SECRET_KEYS = ("anthropic_key", "openai_key")
 
 # Scan code 0x29 = touche située sous Échap (« ² » en AZERTY, « ` » en QWERTY),
@@ -35,7 +35,7 @@ DEFAULTS: dict = {
         "left": {"depth": 35, "span": 100},
         "right": {"depth": 35, "span": 100},
     },
-    "opacity": 97,
+    "opacity": 100,
     "anim_ms": 170,
     "hide_on_focus_loss": True,
     "font_family": "Cascadia Mono",
@@ -92,6 +92,8 @@ class Settings(dict):
                             s["sizes"][edge].update(size)
                 elif key in DEFAULTS:
                     s[key] = value
+        if isinstance(data, dict) and data.get("opacity") == 97:  # ancienne valeur par défaut (transparence gênante)
+            s["opacity"] = 100
         from .winapi import unprotect
         for k in SECRET_KEYS:
             s[k] = unprotect(s.get(k, ""))

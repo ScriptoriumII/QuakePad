@@ -111,8 +111,11 @@ class ShortcutTable(QTableWidget):
 
 
 class SettingsDialog(QDialog):
+    _test_done = Signal(str)
+
     def __init__(self, settings: dict, actions: list[tuple[str, str, str, str]], parent=None):
         super().__init__(parent)
+        self._test_done.connect(self._on_test_done)
         self.setWindowTitle("Paramètres de QuakePad")
         self.setMinimumSize(600, 560)
         s = settings
@@ -372,22 +375,44 @@ class SettingsDialog(QDialog):
         }
 
     def _test_ai(self) -> None:
-        from PySide6.QtWidgets import QApplication
+        """Test dans un thread : la fenêtre reste utilisable pendant l'attente."""
+        import threading
+        import time
 
-        from .ai import AIError, test_connection
+        from PySide6.QtCore import QTimer
 
-        self.test_result.setText("Test en cours…")
+        from .ai import TEST_TIMEOUT, AIError, test_connection
+
+        cfg = self._ai_values()
         self.test_btn.setEnabled(False)
-        QApplication.processEvents()
-        try:
-            out = test_connection(self._ai_values())
-            self.test_result.setText(f"✓ OK : « {out} »")
-        except AIError as exc:
-            self.test_result.setText(f"✗ {exc}")
-        except Exception as exc:  # noqa: BLE001
-            self.test_result.setText(f"✗ {type(exc).__name__} : {exc}")
-        finally:
-            self.test_btn.setEnabled(True)
+        start = time.monotonic()
+        self._test_timer = QTimer(self, interval=500)
+        self._test_timer.timeout.connect(
+            lambda: self.test_result.setText(f"Test en cours… {int(time.monotonic() - start)} s "
+                                             f"(maximum {TEST_TIMEOUT} s)"))
+        self._test_timer.start()
+        self.test_result.setText("Test en cours…")
+
+        def run():
+            try:
+                out = test_connection(cfg)
+                msg = f"✓ OK ({time.monotonic() - start:.1f} s) : « {out} »"
+            except AIError as exc:
+                msg = f"✗ {exc}"
+            except Exception as exc:  # noqa: BLE001
+                msg = f"✗ {type(exc).__name__} : {exc}"
+            try:
+                self._test_done.emit(msg)
+            except RuntimeError:  # dialogue fermé entre-temps
+                pass
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_test_done(self, msg: str) -> None:
+        if getattr(self, "_test_timer", None):
+            self._test_timer.stop()
+        self.test_result.setText(msg)
+        self.test_btn.setEnabled(True)
 
 
 class TableDialog(QDialog):

@@ -30,6 +30,7 @@ PROVIDERS = {
         "base": "https://generativelanguage.googleapis.com/v1beta/openai",
         "model": "gemini-3.8-flash", "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite"],
         "key_url": "https://aistudio.google.com/api-keys", "key_hint": "AIza…",
+        "extra": {"reasoning_effort": "low"},  # la correction ne demande pas de réflexion poussée
         "note": "Gratuit, sans carte bancaire. En offre gratuite, Google peut utiliser les textes pour "
                 "améliorer ses produits (relecture humaine possible) : réservez-le aux notes non sensibles.",
     },
@@ -116,6 +117,7 @@ class AIError(Exception):
 
 
 def _post_json(url: str, payload: dict, headers: dict, timeout: int = 120) -> dict:
+    import socket
     req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
                                  headers={"content-type": "application/json", **headers})
     try:
@@ -141,11 +143,19 @@ def _post_json(url: str, payload: dict, headers: dict, timeout: int = 120) -> di
             raise AIError("Clé API invalide pour ce fournisseur. Vérifiez-la dans Paramètres → Correction.") from exc
         raise AIError(f"Erreur HTTP {exc.code} : {detail}") from exc
     except urllib.error.URLError as exc:
+        if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+            raise AIError(f"Le service IA n'a pas répondu en {timeout} s. Réessayez, ou choisissez un modèle plus "
+                          "rapide (ex. « flash-lite »).") from exc
         raise AIError(f"Serveur injoignable : {exc.reason}") from exc
+    except (TimeoutError, socket.timeout) as exc:
+        raise AIError(f"Le service IA n'a pas répondu en {timeout} s. Réessayez, ou choisissez un modèle plus "
+                      "rapide (ex. « flash-lite »).") from exc
 
 
-def _call(cfg: dict, user_text: str) -> str:
+def _call(cfg: dict, user_text: str, timeout: int | None = None) -> str:
     ep = resolve(cfg)
+    if timeout is None:
+        timeout = 300 if ep["id"] == "ollama" else 120
     if ep["kind"] == "anthropic":
         if not ep["key"]:
             raise AIError("Aucune clé API Anthropic configurée (Paramètres → Correction).")
@@ -154,7 +164,7 @@ def _call(cfg: dict, user_text: str) -> str:
             "max_tokens": 16000,
             "system": SYSTEM_PROMPT,
             "messages": [{"role": "user", "content": user_text}],
-        }, {"x-api-key": ep["key"], "anthropic-version": ANTHROPIC_VERSION})
+        }, {"x-api-key": ep["key"], "anthropic-version": ANTHROPIC_VERSION}, timeout=timeout)
         if data.get("stop_reason") == "max_tokens":
             raise AIError("Réponse tronquée : sélectionnez une partie plus courte du texte.")
         return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
@@ -163,12 +173,14 @@ def _call(cfg: dict, user_text: str) -> str:
         raise AIError(f"Aucune clé API configurée pour {ep['meta']['label'].split(' —')[0]} "
                       "(Paramètres → Correction).")
     headers = {"authorization": f"Bearer {ep['key']}"} if ep["key"] else {}
-    data = _post_json(f"{ep['base']}/chat/completions", {
+    payload = {
         "model": ep["model"],
         "temperature": 0,
         "messages": [{"role": "system", "content": SYSTEM_PROMPT},
                      {"role": "user", "content": user_text}],
-    }, headers, timeout=300)
+        **ep["meta"].get("extra", {}),
+    }
+    data = _post_json(f"{ep['base']}/chat/completions", payload, headers, timeout=timeout)
     if isinstance(data, list) and data and isinstance(data[0], dict) and "error" in data[0]:
         data = data[0]  # certaines API renvoient l'erreur dans une liste
     if isinstance(data, dict) and data.get("error"):
@@ -195,7 +207,7 @@ def _parse_array(text: str, expected: int) -> list[str]:
     return arr
 
 
-def correct_paragraphs(paragraphs: list[str], cfg: dict) -> list[str]:
+def correct_paragraphs(paragraphs: list[str], cfg: dict, timeout: int | None = None) -> list[str]:
     out: list[str] = []
     batch: list[str] = []
     size = 0
@@ -203,7 +215,7 @@ def correct_paragraphs(paragraphs: list[str], cfg: dict) -> list[str]:
     def flush():
         nonlocal batch, size
         if batch:
-            reply = _call(cfg, json.dumps(batch, ensure_ascii=False))
+            reply = _call(cfg, json.dumps(batch, ensure_ascii=False), timeout)
             out.extend(_parse_array(reply, len(batch)))
             batch, size = [], 0
 
@@ -216,8 +228,11 @@ def correct_paragraphs(paragraphs: list[str], cfg: dict) -> list[str]:
     return out
 
 
+TEST_TIMEOUT = 45
+
+
 def test_connection(cfg: dict) -> str:
-    result = correct_paragraphs(["Je suis aller a la plage hier, il faisait tres beaux."], cfg)
+    result = correct_paragraphs(["Je suis aller a la plage hier, il faisait tres beaux."], cfg, TEST_TIMEOUT)
     return result[0]
 
 
